@@ -23,11 +23,39 @@ class _CreateTaskDialogState extends State<CreateTaskDialog> {
   bool _loading = false;
   String? _error;
 
+  DateTime? _deadline;
+
   @override
   void dispose() {
     _title.dispose();
     _desc.dispose();
     super.dispose();
+  }
+
+  String _fmt(DateTime dt) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '${two(dt.day)}.${two(dt.month)}.${dt.year} ${two(dt.hour)}:${two(dt.minute)}';
+  }
+
+  Future<void> _pickDeadline() async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: _deadline ?? now,
+      firstDate: DateTime(now.year - 1),
+      lastDate: DateTime(now.year + 5),
+    );
+    if (date == null) return;
+
+    final time = await showTimePicker(
+      context: context,
+      initialTime: _deadline != null ? TimeOfDay.fromDateTime(_deadline!) : TimeOfDay.now(),
+    );
+    if (time == null) return;
+
+    setState(() {
+      _deadline = DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    });
   }
 
   Future<void> _submit() async {
@@ -49,6 +77,7 @@ class _CreateTaskDialogState extends State<CreateTaskDialog> {
         widget.projectId,
         title: title,
         description: desc.isEmpty ? null : desc,
+        deadline: _deadline,
       );
 
       if (!mounted) return;
@@ -77,6 +106,28 @@ class _CreateTaskDialogState extends State<CreateTaskDialog> {
             controller: _desc,
             decoration: const InputDecoration(labelText: 'Описание'),
           ),
+          const SizedBox(height: 12),
+
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _deadline == null ? 'Дедлайн: не задан' : 'Дедлайн: ${_fmt(_deadline!)}',
+                ),
+              ),
+              TextButton(
+                onPressed: _loading ? null : _pickDeadline,
+                child: const Text('Выбрать'),
+              ),
+              if (_deadline != null)
+                IconButton(
+                  tooltip: 'Убрать дедлайн',
+                  onPressed: _loading ? null : () => setState(() => _deadline = null),
+                  icon: const Icon(Icons.clear),
+                ),
+            ],
+          ),
+
           if (_error != null) ...[
             const SizedBox(height: 10),
             Align(

@@ -23,21 +23,41 @@ class TasksApi {
       String projectId, {
         required String title,
         String? description,
+        DateTime? deadline,
       }) async {
+    final payload = <String, dynamic>{
+      'title': title,
+      'description': description,
+    };
+
+    if (deadline != null) {
+      payload['deadline'] = deadline.toUtc().toIso8601String();
+    }
+
     final res = await api.dio.post(
       '/api/projects/$projectId/tasks',
-      data: {
-        'title': title,
-        'description': description,
-      },
+      data: payload,
     );
     return Task.fromJson(Map<String, dynamic>.from(res.data));
   }
 
   Future<Task> patch(String projectId, String taskId, Map<String, dynamic> patch) async {
+    // Нормализуем PATCH:
+    // - DateTime -> ISO UTC string
+    // - null оставляем null (для удаления дедлайна)
+    final normalized = <String, dynamic>{};
+
+    patch.forEach((key, value) {
+      if (value is DateTime) {
+        normalized[key] = value.toUtc().toIso8601String();
+      } else {
+        normalized[key] = value;
+      }
+    });
+
     final res = await api.dio.patch(
       '/api/projects/$projectId/tasks/$taskId',
-      data: patch,
+      data: normalized,
     );
     return Task.fromJson(Map<String, dynamic>.from(res.data));
   }
