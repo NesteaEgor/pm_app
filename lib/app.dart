@@ -10,6 +10,7 @@ import 'features/projects/projects_api.dart';
 import 'features/projects/projects_screen.dart';
 
 import 'features/tasks/tasks_api.dart';
+import 'features/comments/comments_api.dart';
 
 class App extends StatefulWidget {
   const App({super.key});
@@ -25,17 +26,27 @@ class _AppState extends State<App> {
   late final AuthApi authApi;
   late final ProjectsApi projectsApi;
   late final TasksApi tasksApi;
+  late final CommentsApi commentsApi;
 
   @override
   void initState() {
     super.initState();
 
     tokenStorage = TokenStorage();
-    apiClient = ApiClient(tokenStorage: tokenStorage);
+
+    // ВАЖНО: прокидываем onUnauthorized, чтобы при 401 UI возвращался на логин
+    apiClient = ApiClient(
+      tokenStorage: tokenStorage,
+      onUnauthorized: () async {
+        if (!mounted) return;
+        setState(() {}); // перерисует FutureBuilder -> вернёмся на LoginScreen
+      },
+    );
 
     authApi = AuthApi(api: apiClient, tokenStorage: tokenStorage);
     projectsApi = ProjectsApi(api: apiClient);
     tasksApi = TasksApi(api: apiClient);
+    commentsApi = CommentsApi(api: apiClient);
   }
 
   Future<bool> _hasToken() async {
@@ -77,6 +88,7 @@ class _AppState extends State<App> {
           return ProjectsScreen(
             projectsApi: projectsApi,
             tasksApi: tasksApi,
+            commentsApi: commentsApi,
             authApi: authApi,
             onLoggedOut: () => setState(() {}),
           );

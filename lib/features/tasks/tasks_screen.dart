@@ -5,20 +5,24 @@ import 'edit_task_dialog.dart';
 import 'task.dart';
 import 'tasks_api.dart';
 
-enum TaskFilter { all, todo, inProgress, done }
+import '../comments/comments_api.dart';
+import '../comments/comments_screen.dart';
 
+enum TaskFilter { all, todo, inProgress, done }
 enum TaskSortMode { deadlineAsc, createdAtDesc }
 
 class TasksScreen extends StatefulWidget {
   final String projectId;
   final String projectName;
   final TasksApi tasksApi;
+  final CommentsApi commentsApi;
 
   const TasksScreen({
     super.key,
     required this.projectId,
     required this.projectName,
     required this.tasksApi,
+    required this.commentsApi,
   });
 
   @override
@@ -60,13 +64,12 @@ class _TasksScreenState extends State<TasksScreen> {
     }
 
     // deadlineAsc: null дедлайны — в конец
-    DateTime farFuture = DateTime(9999, 12, 31, 23, 59);
+    final farFuture = DateTime(9999, 12, 31, 23, 59);
     DateTime da(Task t) => t.deadline?.toLocal() ?? farFuture;
 
     list.sort((a, b) {
       final c = da(a).compareTo(da(b));
       if (c != 0) return c;
-      // если дедлайны одинаковые/оба null — новые выше
       return b.createdAt.compareTo(a.createdAt);
     });
   }
@@ -83,8 +86,6 @@ class _TasksScreenState extends State<TasksScreen> {
 
     try {
       final status = _statusParam();
-
-      // Можно оставить sort=deadline для бэка (не обязательно, но пусть будет)
       final sortParam = _sortMode == TaskSortMode.deadlineAsc ? 'deadline' : null;
 
       final list = await widget.tasksApi.list(
@@ -143,6 +144,19 @@ class _TasksScreenState extends State<TasksScreen> {
     if (updated != null) {
       await _load(showSpinner: false);
     }
+  }
+
+  void _openComments(Task t) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CommentsScreen(
+          projectId: widget.projectId,
+          taskId: t.id,
+          taskTitle: t.title,
+          commentsApi: widget.commentsApi,
+        ),
+      ),
+    );
   }
 
   TaskStatus _nextStatus(TaskStatus s) {
@@ -360,6 +374,11 @@ class _TasksScreenState extends State<TasksScreen> {
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  IconButton(
+                    tooltip: 'Комментарии',
+                    icon: const Icon(Icons.chat_bubble_outline),
+                    onPressed: () => _openComments(t),
+                  ),
                   IconButton(
                     tooltip: 'Сменить статус',
                     icon: const Icon(Icons.autorenew),

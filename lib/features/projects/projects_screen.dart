@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/ui/glass.dart';
 import '../auth/auth_api.dart';
+
 import '../tasks/tasks_api.dart';
 import '../tasks/tasks_screen.dart';
+
+import '../comments/comments_api.dart';
+
 import 'create_project_dialog.dart';
 import 'project.dart';
 import 'projects_api.dart';
@@ -11,6 +15,7 @@ import 'projects_api.dart';
 class ProjectsScreen extends StatefulWidget {
   final ProjectsApi projectsApi;
   final TasksApi tasksApi;
+  final CommentsApi commentsApi;
   final AuthApi authApi;
   final VoidCallback onLoggedOut;
 
@@ -18,6 +23,7 @@ class ProjectsScreen extends StatefulWidget {
     super.key,
     required this.projectsApi,
     required this.tasksApi,
+    required this.commentsApi,
     required this.authApi,
     required this.onLoggedOut,
   });
@@ -189,6 +195,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                         projectId: p.id,
                                         projectName: p.name,
                                         tasksApi: widget.tasksApi,
+                                        commentsApi: widget.commentsApi,
                                       ),
                                     ),
                                   );
