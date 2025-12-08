@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
 
 import '../../core/ui/glass.dart';
+import '../../core/storage/token_storage.dart';
+
 import '../auth/auth_api.dart';
 
 import '../tasks/tasks_api.dart';
 import '../tasks/tasks_screen.dart';
 
 import '../comments/comments_api.dart';
+
+import '../chat/chat_api.dart';
+import '../chat/project_chat_screen.dart';
 
 import 'create_project_dialog.dart';
 import 'project.dart';
@@ -16,6 +21,11 @@ class ProjectsScreen extends StatefulWidget {
   final ProjectsApi projectsApi;
   final TasksApi tasksApi;
   final CommentsApi commentsApi;
+
+  // чат
+  final ChatApi chatApi;
+  final TokenStorage tokenStorage;
+
   final AuthApi authApi;
   final VoidCallback onLoggedOut;
 
@@ -24,6 +34,8 @@ class ProjectsScreen extends StatefulWidget {
     required this.projectsApi,
     required this.tasksApi,
     required this.commentsApi,
+    required this.chatApi,
+    required this.tokenStorage,
     required this.authApi,
     required this.onLoggedOut,
   });
@@ -59,6 +71,32 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     if (created != null) {
       await _refresh();
     }
+  }
+
+  void _openChat(Project p) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProjectChatScreen(
+          projectId: p.id,
+          projectName: p.name,
+          chatApi: widget.chatApi,
+          tokenStorage: widget.tokenStorage,
+        ),
+      ),
+    );
+  }
+
+  void _openTasks(Project p) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => TasksScreen(
+          projectId: p.id,
+          projectName: p.name,
+          tasksApi: widget.tasksApi,
+          commentsApi: widget.commentsApi,
+        ),
+      ),
+    );
   }
 
   @override
@@ -173,33 +211,37 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                   style: const TextStyle(fontWeight: FontWeight.w700),
                                 ),
                                 subtitle: Text(p.description ?? 'Без описания'),
-                                trailing: IconButton(
-                                  icon: const Icon(Icons.delete_outline),
-                                  onPressed: () async {
-                                    try {
-                                      await widget.projectsApi.delete(p.id);
-                                      if (!mounted) return;
-                                      await _refresh();
-                                    } catch (e) {
-                                      if (!mounted) return;
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Не удалось удалить: $e')),
-                                      );
-                                    }
-                                  },
-                                ),
-                                onTap: () {
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (_) => TasksScreen(
-                                        projectId: p.id,
-                                        projectName: p.name,
-                                        tasksApi: widget.tasksApi,
-                                        commentsApi: widget.commentsApi,
-                                      ),
+
+                                // теперь справа: чат + удалить
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      tooltip: 'Чат проекта',
+                                      icon: const Icon(Icons.chat_bubble_outline),
+                                      onPressed: () => _openChat(p),
                                     ),
-                                  );
-                                },
+                                    IconButton(
+                                      tooltip: 'Удалить проект',
+                                      icon: const Icon(Icons.delete_outline),
+                                      onPressed: () async {
+                                        try {
+                                          await widget.projectsApi.delete(p.id);
+                                          if (!mounted) return;
+                                          await _refresh();
+                                        } catch (e) {
+                                          if (!mounted) return;
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(content: Text('Не удалось удалить: $e')),
+                                          );
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+
+                                // тап по плитке
+                                onTap: () => _openTasks(p),
                               ),
                             );
                           },

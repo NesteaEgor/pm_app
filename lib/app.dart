@@ -11,6 +11,7 @@ import 'features/projects/projects_screen.dart';
 
 import 'features/tasks/tasks_api.dart';
 import 'features/comments/comments_api.dart';
+import 'features/chat/chat_api.dart';
 
 class App extends StatefulWidget {
   const App({super.key});
@@ -27,6 +28,7 @@ class _AppState extends State<App> {
   late final ProjectsApi projectsApi;
   late final TasksApi tasksApi;
   late final CommentsApi commentsApi;
+  late final ChatApi chatApi;
 
   @override
   void initState() {
@@ -47,6 +49,9 @@ class _AppState extends State<App> {
     projectsApi = ProjectsApi(api: apiClient);
     tasksApi = TasksApi(api: apiClient);
     commentsApi = CommentsApi(api: apiClient);
+
+    // добавили чат
+    chatApi = ChatApi(api: apiClient);
   }
 
   Future<bool> _hasToken() async {
@@ -89,6 +94,11 @@ class _AppState extends State<App> {
             projectsApi: projectsApi,
             tasksApi: tasksApi,
             commentsApi: commentsApi,
+
+            // добавили чат и tokenStorage для WS
+            chatApi: chatApi,
+            tokenStorage: tokenStorage,
+
             authApi: authApi,
             onLoggedOut: () => setState(() {}),
           );
