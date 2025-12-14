@@ -1,5 +1,6 @@
 import '../../core/api/api_client.dart';
 import 'chat_message.dart';
+import 'chat_read.dart';
 
 class ChatApi {
   final ApiClient api;
@@ -21,8 +22,12 @@ class ChatApi {
     );
 
     final data = (res.data as List).cast<dynamic>();
-    return data
-        .map((e) => ChatMessage.fromJson(Map<String, dynamic>.from(e)))
-        .toList();
+    return data.map((e) => ChatMessage.fromJson(Map<String, dynamic>.from(e))).toList();
+  }
+
+  Future<List<ChatRead>> reads({required String projectId}) async {
+    final res = await api.dio.get('/api/projects/$projectId/reads');
+    final data = (res.data as List).cast<dynamic>();
+    return data.map((e) => ChatRead.fromJson(Map<String, dynamic>.from(e))).toList();
   }
 }
