@@ -10,6 +10,10 @@ import 'chat_api.dart';
 import 'chat_message.dart';
 import 'chat_read.dart';
 
+// imports
+import '../members/project_members_api.dart';
+import '../members/project_members_screen.dart';
+
 class _PendingSend {
   final String clientMessageId;
   final String text;
@@ -29,12 +33,16 @@ class ProjectChatScreen extends StatefulWidget {
   final ChatApi chatApi;
   final TokenStorage tokenStorage;
 
+  // widget field
+  final ProjectMembersApi projectMembersApi;
+
   const ProjectChatScreen({
     super.key,
     required this.projectId,
     required this.projectName,
     required this.chatApi,
     required this.tokenStorage,
+    required this.projectMembersApi,
   });
 
   @override
@@ -87,6 +95,19 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     _scroll.dispose();
     _stomp?.deactivate();
     super.dispose();
+  }
+
+  void _openMembers() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProjectMembersScreen(
+          projectId: widget.projectId,
+          projectName: widget.projectName,
+          api: widget.projectMembersApi,
+          tokenStorage: widget.tokenStorage,
+        ),
+      ),
+    );
   }
 
   void _onScroll() {
@@ -764,6 +785,14 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Чат: ${widget.projectName}'),
+        // AppBar actions
+        actions: [
+          IconButton(
+            tooltip: 'Участники проекта',
+            icon: const Icon(Icons.group_outlined),
+            onPressed: _openMembers,
+          ),
+        ],
       ),
       body: Column(
         children: [

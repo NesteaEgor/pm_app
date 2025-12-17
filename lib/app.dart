@@ -13,6 +13,8 @@ import 'features/tasks/tasks_api.dart';
 import 'features/comments/comments_api.dart';
 import 'features/chat/chat_api.dart';
 
+import 'features/members/project_members_api.dart';
+
 class App extends StatefulWidget {
   const App({super.key});
 
@@ -30,18 +32,19 @@ class _AppState extends State<App> {
   late final CommentsApi commentsApi;
   late final ChatApi chatApi;
 
+  late final ProjectMembersApi projectMembersApi;
+
   @override
   void initState() {
     super.initState();
 
     tokenStorage = TokenStorage();
 
-    // ВАЖНО: прокидываем onUnauthorized, чтобы при 401 UI возвращался на логин
     apiClient = ApiClient(
       tokenStorage: tokenStorage,
       onUnauthorized: () async {
         if (!mounted) return;
-        setState(() {}); // перерисует FutureBuilder -> вернёмся на LoginScreen
+        setState(() {});
       },
     );
 
@@ -50,8 +53,9 @@ class _AppState extends State<App> {
     tasksApi = TasksApi(api: apiClient);
     commentsApi = CommentsApi(api: apiClient);
 
-    // добавили чат
     chatApi = ChatApi(api: apiClient);
+
+    projectMembersApi = ProjectMembersApi(api: apiClient);
   }
 
   Future<bool> _hasToken() async {
@@ -95,9 +99,10 @@ class _AppState extends State<App> {
             tasksApi: tasksApi,
             commentsApi: commentsApi,
 
-            // добавили чат и tokenStorage для WS
             chatApi: chatApi,
             tokenStorage: tokenStorage,
+
+            projectMembersApi: projectMembersApi,
 
             authApi: authApi,
             onLoggedOut: () => setState(() {}),

@@ -17,14 +17,17 @@ import 'create_project_dialog.dart';
 import 'project.dart';
 import 'projects_api.dart';
 
+import '../members/project_members_api.dart';
+
 class ProjectsScreen extends StatefulWidget {
   final ProjectsApi projectsApi;
   final TasksApi tasksApi;
   final CommentsApi commentsApi;
 
-  // чат
   final ChatApi chatApi;
   final TokenStorage tokenStorage;
+
+  final ProjectMembersApi projectMembersApi;
 
   final AuthApi authApi;
   final VoidCallback onLoggedOut;
@@ -36,6 +39,7 @@ class ProjectsScreen extends StatefulWidget {
     required this.commentsApi,
     required this.chatApi,
     required this.tokenStorage,
+    required this.projectMembersApi,
     required this.authApi,
     required this.onLoggedOut,
   });
@@ -67,10 +71,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
 
     if (!mounted) return;
-
-    if (created != null) {
-      await _refresh();
-    }
+    if (created != null) await _refresh();
   }
 
   void _openChat(Project p) {
@@ -81,6 +82,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           projectName: p.name,
           chatApi: widget.chatApi,
           tokenStorage: widget.tokenStorage,
+          projectMembersApi: widget.projectMembersApi,
         ),
       ),
     );
@@ -104,7 +106,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          // фон
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -146,7 +147,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                     child: FutureBuilder<List<Project>>(
                       future: _future,
                       builder: (context, snap) {
-                        // Лоадинг
                         if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
                           return ListView(
                             children: const [
@@ -156,7 +156,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                           );
                         }
 
-                        // Ошибка
                         if (snap.hasError) {
                           return ListView(
                             padding: const EdgeInsets.all(16),
@@ -181,7 +180,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
                         final projects = snap.data ?? [];
 
-                        // Пусто
                         if (projects.isEmpty) {
                           return ListView(
                             padding: const EdgeInsets.all(16),
@@ -197,7 +195,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                           );
                         }
 
-                        // Список
                         return ListView.separated(
                           padding: const EdgeInsets.all(16),
                           itemCount: projects.length,
@@ -211,8 +208,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                   style: const TextStyle(fontWeight: FontWeight.w700),
                                 ),
                                 subtitle: Text(p.description ?? 'Без описания'),
-
-                                // теперь справа: чат + удалить
                                 trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
@@ -239,8 +234,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                     ),
                                   ],
                                 ),
-
-                                // тап по плитке
                                 onTap: () => _openTasks(p),
                               ),
                             );
