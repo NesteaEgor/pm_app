@@ -2,21 +2,23 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:stomp_dart_client/stomp_dart_client.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/storage/token_storage.dart';
 import 'chat_api.dart';
 import 'chat_message.dart';
 import 'chat_read.dart';
 
-// imports
 import '../members/project_members_api.dart';
 import '../members/project_members_screen.dart';
 
 class _PendingSend {
   final String clientMessageId;
   final String text;
+  final List<String> attachmentIds;
 
   int attempts = 0;
   DateTime lastAttempt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -24,7 +26,68 @@ class _PendingSend {
   _PendingSend({
     required this.clientMessageId,
     required this.text,
+    required this.attachmentIds,
   });
+}
+
+class _TypingEvent {
+  final String projectId;
+  final String userId;
+  final String userName;
+  final bool typing;
+
+  _TypingEvent({
+    required this.projectId,
+    required this.userId,
+    required this.userName,
+    required this.typing,
+  });
+
+  factory _TypingEvent.fromJson(Map<String, dynamic> json) {
+    return _TypingEvent(
+      projectId: json['projectId']?.toString() ?? '',
+      userId: json['userId']?.toString() ?? '',
+      userName: (json['userName'] ?? 'Unknown').toString(),
+      typing: json['typing'] == true,
+    );
+  }
+}
+
+class _ReactionEvent {
+  final String projectId;
+  final String messageId;
+  final String emoji;
+
+  final Map<String, int>? reactions;
+
+  final String? userId;
+  final bool? added;
+
+  _ReactionEvent({
+    required this.projectId,
+    required this.messageId,
+    required this.emoji,
+    required this.reactions,
+    required this.userId,
+    required this.added,
+  });
+
+  factory _ReactionEvent.fromJson(Map<String, dynamic> json) {
+    Map<String, int>? rx;
+    final raw = json['reactions'];
+    if (raw is Map) {
+      rx = raw.map((k, v) => MapEntry(k.toString(), (v as num).toInt()));
+    }
+
+    return _ReactionEvent(
+      projectId: json['projectId']?.toString() ?? '',
+      messageId: json['messageId']?.toString() ?? '',
+      emoji: json['emoji']?.toString() ?? '',
+      reactions: rx,
+      userId: json['userId']?.toString(),
+      added: json['added'] is bool ? json['added'] as bool : null,
+    );
+  }
 }
 
 class ProjectChatScreen extends StatefulWidget {
@@ -33,7 +96,6 @@ class ProjectChatScreen extends StatefulWidget {
   final ChatApi chatApi;
   final TokenStorage tokenStorage;
 
-  // widget field
   final ProjectMembersApi projectMembersApi;
 
   const ProjectChatScreen({
@@ -62,21 +124,28 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
   StompClient? _stomp;
   bool _wsConnected = false;
 
-  // pending-index for replacing optimistic messages
   final Map<String, int> _pendingIndexByClientId = {};
 
-  // outbox for retries
   final Map<String, _PendingSend> _outbox = {};
   Timer? _retryTimer;
 
   String? _myUserId;
 
-  // read receipts: userId -> lastReadMessageAt (time of message that user read up to)
   final Map<String, DateTime> _lastReadMessageAtByUser = {};
+  final Map<String, String> _userNameByUserId = {};
 
-  // throttling read-send
   String? _lastReadSentMessageId;
   DateTime _lastReadSentAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  final Map<String, DateTime> _typingUntilByUser = {};
+  final Map<String, String> _typingNameByUser = {};
+  Timer? _typingGcTimer;
+  Timer? _typingStopDebounce;
+  DateTime _lastTypingSentAt = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _typingSent = false;
+
+  final List<ChatAttachment> _composerAttachments = [];
+  final Set<String> _uploadingNames = {};
 
   @override
   void initState() {
@@ -84,13 +153,30 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     _init();
     _scroll.addListener(_onScroll);
 
-    // retry loop
     _retryTimer = Timer.periodic(const Duration(seconds: 2), (_) => _flushOutbox());
+
+    _typingGcTimer = Timer.periodic(const Duration(milliseconds: 600), (_) {
+      final now = DateTime.now();
+      final toRemove = <String>[];
+      for (final e in _typingUntilByUser.entries) {
+        if (!e.value.isAfter(now)) toRemove.add(e.key);
+      }
+      if (toRemove.isNotEmpty && mounted) {
+        setState(() {
+          for (final id in toRemove) {
+            _typingUntilByUser.remove(id);
+            _typingNameByUser.remove(id);
+          }
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
     _retryTimer?.cancel();
+    _typingGcTimer?.cancel();
+    _typingStopDebounce?.cancel();
     _ctrl.dispose();
     _scroll.dispose();
     _stomp?.deactivate();
@@ -110,13 +196,45 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     );
   }
 
+  void _openReadByDialog(ChatMessage m) {
+    final readers = <String>[];
+    for (final entry in _lastReadMessageAtByUser.entries) {
+      final uid = entry.key;
+      final at = entry.value;
+      if (at.isAfter(m.createdAt) || at.isAtSameMomentAs(m.createdAt)) {
+        readers.add(_userNameByUserId[uid] ?? uid);
+      }
+    }
+    readers.sort();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Прочитали'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: readers.isEmpty
+              ? const Text('Нет данных')
+              : ListView.builder(
+            shrinkWrap: true,
+            itemCount: readers.length,
+            itemBuilder: (_, i) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(readers[i]),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Закрыть')),
+        ],
+      ),
+    );
+  }
+
   void _onScroll() {
-    // пагинация назад
     if (_scroll.position.pixels <= 80 && !_loadingMore && _items.isNotEmpty) {
       _loadMore();
     }
-
-    // если юзер у низа — отметим прочтение
     _maybeSendRead();
   }
 
@@ -125,10 +243,9 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     _myUserId = _tryReadSubFromJwt(token);
 
     await _loadInitial();
-    await _loadReadsInitial(); // 👈 new
+    await _loadReadsInitial();
     await _connectWs();
 
-    // если уже внизу — отправим read
     _maybeSendRead(force: true);
   }
 
@@ -198,15 +315,17 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
 
       setState(() {
         _lastReadMessageAtByUser.clear();
+        _userNameByUserId.clear();
         for (final r in reads) {
-          if (r.userId == _myUserId) continue; // нам не надо считать себя
+          if (r.userId == _myUserId) continue;
           final at = r.lastReadMessageAt;
           if (at != null) _lastReadMessageAtByUser[r.userId] = at.toLocal();
+
+          final name = r.userName;
+          if (name != null && name.isNotEmpty) _userNameByUserId[r.userId] = name;
         }
       });
-    } catch (_) {
-      // не критично
-    }
+    } catch (_) {}
   }
 
   Future<void> _loadMore() async {
@@ -237,7 +356,6 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
         });
       }
     } catch (_) {
-      // тихо
     } finally {
       if (mounted) setState(() => _loadingMore = false);
     }
@@ -297,8 +415,9 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
   void _onConnect(StompFrame frame) {
     final msgTopic = '/topic/projects/${widget.projectId}/messages';
     final readTopic = '/topic/projects/${widget.projectId}/reads';
+    final typingTopic = '/topic/projects/${widget.projectId}/typing';
+    final reactionsTopic = '/topic/projects/${widget.projectId}/reactions';
 
-    // 1) сообщения
     _stomp?.subscribe(
       destination: msgTopic,
       callback: (StompFrame f) {
@@ -309,16 +428,16 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
 
         if (!mounted) return;
 
-        final type = jsonMap['eventType']?.toString(); // CREATED / UPDATED / DELETED
+        final type = jsonMap['eventType']?.toString();
         final cid = jsonMap['clientMessageId']?.toString();
 
-        // ACK created по clientMessageId — подтверждаем pending
         if ((type == null || type == 'CREATED') &&
             cid != null &&
             _pendingIndexByClientId.containsKey(cid)) {
           final idx = _pendingIndexByClientId[cid]!;
           setState(() {
-            _items[idx] = _items[idx].copyWith(
+            final old = _items[idx];
+            _items[idx] = old.copyWith(
               id: msg.id,
               createdAt: msg.createdAt,
               status: ChatSendStatus.sent,
@@ -326,6 +445,9 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
               text: msg.text,
               editedAt: msg.editedAt,
               deletedAt: msg.deletedAt,
+              attachments: msg.attachments.isNotEmpty ? msg.attachments : old.attachments,
+              reactions: msg.reactions.isNotEmpty ? msg.reactions : old.reactions,
+              myReactions: msg.myReactions.isNotEmpty ? msg.myReactions : old.myReactions,
             );
             _pendingIndexByClientId.remove(cid);
             _outbox.remove(cid);
@@ -336,30 +458,31 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
           return;
         }
 
-        // UPDATED / DELETED — обновляем по id
         if ((type == 'UPDATED' || type == 'DELETED') && msg.id != null) {
           final i = _items.indexWhere((x) => x.id == msg.id);
           if (i != -1) {
             setState(() {
-              _items[i] = _items[i].copyWith(
+              final old = _items[i];
+              _items[i] = old.copyWith(
                 text: msg.text,
                 editedAt: msg.editedAt,
                 deletedAt: msg.deletedAt,
                 authorName: msg.authorName,
+                attachments: msg.attachments.isNotEmpty ? msg.attachments : old.attachments,
+                reactions: msg.reactions.isNotEmpty ? msg.reactions : old.reactions,
+                myReactions: msg.myReactions.isNotEmpty ? msg.myReactions : old.myReactions,
               );
             });
           }
           return;
         }
 
-        // иначе добавляем
         setState(() => _items.add(msg));
         _scrollToBottomSoft();
         _maybeSendRead(force: true);
       },
     );
 
-    // 2) read receipts
     _stomp?.subscribe(
       destination: readTopic,
       callback: (StompFrame f) {
@@ -376,6 +499,76 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
 
         setState(() {
           _lastReadMessageAtByUser[r.userId] = at;
+          final name = r.userName;
+          if (name != null && name.isNotEmpty) _userNameByUserId[r.userId] = name;
+        });
+      },
+    );
+
+    _stomp?.subscribe(
+      destination: typingTopic,
+      callback: (StompFrame f) {
+        if (f.body == null) return;
+        final jsonMap = jsonDecode(f.body!) as Map<String, dynamic>;
+        final ev = _TypingEvent.fromJson(jsonMap);
+
+        if (!mounted) return;
+        if (ev.userId.isEmpty) return;
+        if (ev.userId == _myUserId) return;
+
+        setState(() {
+          if (ev.typing) {
+            _typingUntilByUser[ev.userId] = DateTime.now().add(const Duration(seconds: 4));
+            _typingNameByUser[ev.userId] = ev.userName;
+          } else {
+            _typingUntilByUser.remove(ev.userId);
+            _typingNameByUser.remove(ev.userId);
+          }
+        });
+      },
+    );
+
+    _stomp?.subscribe(
+      destination: reactionsTopic,
+      callback: (StompFrame f) {
+        if (f.body == null) return;
+        final jsonMap = jsonDecode(f.body!) as Map<String, dynamic>;
+        final ev = _ReactionEvent.fromJson(jsonMap);
+
+        if (!mounted) return;
+        if (ev.messageId.isEmpty) return;
+
+        final i = _items.indexWhere((x) => x.id == ev.messageId);
+        if (i == -1) return;
+
+        setState(() {
+          final old = _items[i];
+          final newReactions = Map<String, int>.from(old.reactions);
+          final newMy = Set<String>.from(old.myReactions);
+
+          if (ev.reactions != null) {
+            newReactions
+              ..clear()
+              ..addAll(ev.reactions!);
+          } else if (ev.emoji.isNotEmpty && ev.added != null && ev.userId != null) {
+            final cur = newReactions[ev.emoji] ?? 0;
+            final next = ev.added! ? (cur + 1) : (cur - 1);
+            if (next <= 0) {
+              newReactions.remove(ev.emoji);
+            } else {
+              newReactions[ev.emoji] = next;
+            }
+
+            if (ev.userId == _myUserId) {
+              if (ev.added!) {
+                newMy.add(ev.emoji);
+              } else {
+                newMy.remove(ev.emoji);
+              }
+            }
+          }
+
+          _items[i] = old.copyWith(reactions: newReactions, myReactions: newMy);
         });
       },
     );
@@ -393,8 +586,12 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     });
   }
 
-  void _enqueueAndTrySend(String text) {
+  void _enqueueAndTrySend({
+    required String text,
+    required List<ChatAttachment> attachments,
+  }) {
     final clientId = _newClientMessageId();
+    final attachmentIds = attachments.map((a) => a.id).where((x) => x.isNotEmpty).toList();
 
     final pending = ChatMessage.pending(
       clientMessageId: clientId,
@@ -402,12 +599,17 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
       authorId: _myUserId ?? 'me',
       authorName: 'You',
       text: text,
+      attachments: attachments,
     );
 
     setState(() {
       _items.add(pending);
       _pendingIndexByClientId[clientId] = _items.length - 1;
-      _outbox[clientId] = _PendingSend(clientMessageId: clientId, text: text);
+      _outbox[clientId] = _PendingSend(
+        clientMessageId: clientId,
+        text: text,
+        attachmentIds: attachmentIds,
+      );
     });
 
     _scrollToBottomSoft();
@@ -432,16 +634,19 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
         p.attempts += 1;
         p.lastAttempt = now;
 
+        final body = <String, dynamic>{
+          'text': p.text,
+          'clientMessageId': cid,
+        };
+        if (p.attachmentIds.isNotEmpty) {
+          body['attachmentIds'] = p.attachmentIds;
+        }
+
         _stomp!.send(
           destination: '/app/projects/${widget.projectId}/messages',
-          body: jsonEncode({
-            'text': p.text,
-            'clientMessageId': cid,
-          }),
+          body: jsonEncode(body),
         );
-      } catch (_) {
-        // попробуем позже
-      }
+      } catch (_) {}
     }
   }
 
@@ -453,7 +658,6 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
   }
 
   ChatMessage? _latestReadableMessage() {
-    // последнее подтверждённое сообщение (с id), чтобы read было стабильным
     for (var i = _items.length - 1; i >= 0; i--) {
       final m = _items[i];
       if (m.id != null && m.status == ChatSendStatus.sent) return m;
@@ -472,9 +676,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
 
     final now = DateTime.now();
     if (!force) {
-      // throttle: не чаще раза в секунду
       if (now.difference(_lastReadSentAt) < const Duration(seconds: 1)) return;
-      // и не шлём одно и то же
       if (_lastReadSentMessageId == last.id) return;
     }
 
@@ -486,19 +688,201 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
         destination: '/app/projects/${widget.projectId}/read',
         body: jsonEncode({'messageId': last.id}),
       );
-    } catch (_) {
-      // не критично
+    } catch (_) {}
+  }
+
+  void _onComposerChanged(String value) {
+    if (!_wsConnected || _stomp == null) return;
+
+    final now = DateTime.now();
+    final shouldSendStart = !_typingSent ||
+        now.difference(_lastTypingSentAt) >= const Duration(milliseconds: 900);
+
+    if (shouldSendStart) {
+      _sendTyping(true);
+    }
+
+    _typingStopDebounce?.cancel();
+    _typingStopDebounce = Timer(const Duration(milliseconds: 1200), () {
+      _sendTyping(false);
+    });
+  }
+
+  void _sendTyping(bool typing) {
+    if (!_wsConnected || _stomp == null) return;
+
+    if (typing == _typingSent && DateTime.now().difference(_lastTypingSentAt) < const Duration(seconds: 1)) {
+      return;
+    }
+
+    _typingSent = typing;
+    _lastTypingSentAt = DateTime.now();
+
+    try {
+      _stomp!.send(
+        destination: '/app/projects/${widget.projectId}/typing',
+        body: jsonEncode({'typing': typing}),
+      );
+    } catch (_) {}
+  }
+
+  String? _typingLineText() {
+    final now = DateTime.now();
+    final ids = _typingUntilByUser.entries
+        .where((e) => e.value.isAfter(now))
+        .map((e) => e.key)
+        .where((id) => id != _myUserId)
+        .toList();
+
+    if (ids.isEmpty) return null;
+
+    final names = ids.map((id) => _typingNameByUser[id] ?? 'Кто-то').toList();
+    if (names.length == 1) return '${names[0]} печатает…';
+    if (names.length == 2) return '${names[0]} и ${names[1]} печатают…';
+    return '${names[0]}, ${names[1]} и ещё ${names.length - 2} печатают…';
+  }
+
+  Future<void> _openReactionPicker(ChatMessage m) async {
+    if (m.id == null || m.isDeleted) return;
+
+    const emojis = ['👍', '❤️', '😂', '🔥', '😮', '😢', '👎', '🎉'];
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: emojis
+                .map(
+                  (e) => InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => Navigator.pop(ctx, e),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.12),
+                  ),
+                  child: Text(e, style: const TextStyle(fontSize: 22)),
+                ),
+              ),
+            )
+                .toList(),
+          ),
+        ),
+      ),
+    );
+
+    if (!mounted || picked == null) return;
+    _toggleReaction(m, picked);
+  }
+
+  void _toggleReaction(ChatMessage m, String emoji) {
+    if (m.id == null || m.isDeleted) return;
+    if (!_wsConnected || _stomp == null) return;
+
+    final i = _items.indexWhere((x) => x.id == m.id);
+    if (i != -1) {
+      setState(() {
+        final old = _items[i];
+        final rx = Map<String, int>.from(old.reactions);
+        final my = Set<String>.from(old.myReactions);
+
+        final had = my.contains(emoji);
+        if (had) {
+          my.remove(emoji);
+          final cur = rx[emoji] ?? 0;
+          final next = cur - 1;
+          if (next <= 0) {
+            rx.remove(emoji);
+          } else {
+            rx[emoji] = next;
+          }
+        } else {
+          my.add(emoji);
+          rx[emoji] = (rx[emoji] ?? 0) + 1;
+        }
+
+        _items[i] = old.copyWith(reactions: rx, myReactions: my);
+      });
+    }
+
+    try {
+      _stomp!.send(
+        destination: '/app/projects/${widget.projectId}/messages/${m.id}/reactions/toggle',
+        body: jsonEncode({'emoji': emoji}),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _pickAndUploadFiles() async {
+    if (_sending) return;
+
+    FilePickerResult? res;
+    try {
+      res = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        withData: false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Не удалось выбрать файл: $e')));
+      return;
+    }
+
+    if (!mounted || res == null || res.files.isEmpty) return;
+
+    for (final f in res.files) {
+      final path = f.path;
+      if (path == null || path.isEmpty) continue;
+
+      setState(() => _uploadingNames.add(f.name));
+      try {
+        final att = await widget.chatApi.uploadFile(
+          projectId: widget.projectId,
+          filePath: path,
+          fileName: f.name,
+        );
+        if (!mounted) return;
+        setState(() => _composerAttachments.add(att));
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload не удался (${f.name}): $e')));
+      } finally {
+        if (mounted) setState(() => _uploadingNames.remove(f.name));
+      }
+    }
+  }
+
+  String _attachmentUrl(ChatAttachment a) {
+    if (a.url != null && a.url!.isNotEmpty) return a.url!;
+    return 'http://127.0.0.1:8080/api/projects/${widget.projectId}/files/${a.id}';
+  }
+
+  Future<void> _openAttachment(ChatAttachment a) async {
+    final url = _attachmentUrl(a);
+    final uri = Uri.parse(url);
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось открыть файл')));
     }
   }
 
   Future<void> _send() async {
     final text = _ctrl.text.trim();
-    if (text.isEmpty) return;
+    final attachments = List<ChatAttachment>.from(_composerAttachments);
+
+    if (text.isEmpty && attachments.isEmpty) return;
 
     setState(() => _sending = true);
     try {
-      _enqueueAndTrySend(text);
+      _enqueueAndTrySend(text: text, attachments: attachments);
       _ctrl.clear();
+      setState(() => _composerAttachments.clear());
+
+      _sendTyping(false);
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -521,6 +905,11 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
+              leading: const Icon(Icons.emoji_emotions_outlined),
+              title: const Text('Реакция'),
+              onTap: () => Navigator.pop(ctx, 'react'),
+            ),
+            ListTile(
               leading: const Icon(Icons.edit),
               title: const Text('Редактировать'),
               onTap: () => Navigator.pop(ctx, 'edit'),
@@ -537,7 +926,9 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
 
     if (!mounted || act == null) return;
 
-    if (act == 'edit') {
+    if (act == 'react') {
+      await _openReactionPicker(m);
+    } else if (act == 'edit') {
       await _editMessage(m);
     } else if (act == 'delete') {
       await _deleteMessage(m);
@@ -572,7 +963,6 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     final text = (newText ?? '').trim();
     if (text.isEmpty) return;
 
-    // optimistic
     setState(() {
       final i = _items.indexWhere((x) => x.id == m.id);
       if (i != -1) {
@@ -613,7 +1003,6 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
 
     if (!mounted || ok != true) return;
 
-    // optimistic
     setState(() {
       final i = _items.indexWhere((x) => x.id == m.id);
       if (i != -1) {
@@ -645,7 +1034,6 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
   }
 
   int _readCountForMessage(ChatMessage m) {
-    // считаем прочитавших по времени последнего read-message у каждого юзера
     int c = 0;
     for (final entry in _lastReadMessageAtByUser.entries) {
       final at = entry.value;
@@ -656,8 +1044,82 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     return c;
   }
 
+  Widget _buildAttachmentsInMessage(ChatMessage m) {
+    if (m.attachments.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: m.attachments.map((a) {
+          return InkWell(
+            onTap: () => _openAttachment(a),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.attach_file, size: 16),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      a.fileName,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        decoration: TextDecoration.underline,
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.9),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildReactionsRow(ChatMessage m, {required bool isMine}) {
+    if (m.isDeleted || m.id == null) return const SizedBox.shrink();
+
+    final chips = <Widget>[];
+
+    for (final e in m.reactions.entries) {
+      final emoji = e.key;
+      final count = e.value;
+      if (count <= 0) continue;
+
+      chips.add(
+        FilterChip(
+          selected: m.myReactions.contains(emoji),
+          label: Text('$emoji $count'),
+          onSelected: (_) => _toggleReaction(m, emoji),
+        ),
+      );
+    }
+
+    chips.add(
+      ActionChip(
+        label: const Text('➕'),
+        onPressed: () => _openReactionPicker(m),
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: chips,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final typingLine = _typingLineText();
+
     final body = _loading
         ? const Center(child: CircularProgressIndicator())
         : _error != null
@@ -704,7 +1166,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
             child: GestureDetector(
               onLongPress: canManage ? () => _openMessageMenu(m) : null,
               child: Container(
-                constraints: const BoxConstraints(maxWidth: 320),
+                constraints: const BoxConstraints(maxWidth: 340),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(14),
@@ -721,16 +1183,19 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      m.text,
-                      style: deleted
-                          ? TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
-                        fontStyle: FontStyle.italic,
-                      )
-                          : null,
-                    ),
-                    const SizedBox(height: 6),
+                    if (m.text.isNotEmpty)
+                      Text(
+                        m.text,
+                        style: deleted
+                            ? TextStyle(
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
+                          fontStyle: FontStyle.italic,
+                        )
+                            : null,
+                      ),
+                    _buildAttachmentsInMessage(m),
+                    _buildReactionsRow(m, isMine: isMine),
+                    const SizedBox(height: 8),
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -763,11 +1228,14 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
                         ],
                         if (showRead) ...[
                           const SizedBox(width: 10),
-                          Text(
-                            'прочитано: $readCount',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                          InkWell(
+                            onTap: () => _openReadByDialog(m),
+                            child: Text(
+                              'прочитано: $readCount',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                              ),
                             ),
                           ),
                         ],
@@ -785,7 +1253,6 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text('Чат: ${widget.projectName}'),
-        // AppBar actions
         actions: [
           IconButton(
             tooltip: 'Участники проекта',
@@ -797,10 +1264,65 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
       body: Column(
         children: [
           Expanded(child: body),
+          if (typingLine != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  typingLine,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+                  ),
+                ),
+              ),
+            ),
+          if (_composerAttachments.isNotEmpty || _uploadingNames.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ..._composerAttachments.map(
+                        (a) => InputChip(
+                      label: Text(a.fileName),
+                      onDeleted: _sending
+                          ? null
+                          : () {
+                        setState(() => _composerAttachments.removeWhere((x) => x.id == a.id));
+                      },
+                    ),
+                  ),
+                  ..._uploadingNames.map(
+                        (name) => Chip(
+                      label: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(child: Text('upload: $name', overflow: TextOverflow.ellipsis)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
             child: Row(
               children: [
+                IconButton(
+                  tooltip: 'Прикрепить файл',
+                  onPressed: _sending ? null : _pickAndUploadFiles,
+                  icon: const Icon(Icons.attach_file),
+                ),
                 Expanded(
                   child: TextField(
                     controller: _ctrl,
@@ -808,6 +1330,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
                       hintText: 'Сообщение...',
                       border: OutlineInputBorder(),
                     ),
+                    onChanged: _onComposerChanged,
                     onSubmitted: (_) => _sending ? null : _send(),
                   ),
                 ),
