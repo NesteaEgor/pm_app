@@ -147,6 +147,8 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
   final List<ChatAttachment> _composerAttachments = [];
   final Set<String> _uploadingNames = {};
 
+  String? _token;
+
   @override
   void initState() {
     super.initState();
@@ -181,6 +183,24 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     _scroll.dispose();
     _stomp?.deactivate();
     super.dispose();
+  }
+
+  Map<String, String> _authHeaders() {
+    final t = (_token ?? '').trim();
+    if (t.isEmpty) return const {};
+    return {'Authorization': 'Bearer $t'};
+  }
+
+  String _externalDownloadUrl(ChatAttachment a) {
+    final base = _attachmentUrl(a);
+    final t = (_token ?? '').trim();
+    if (t.isEmpty) return base;
+
+    final uri = Uri.parse(base);
+    final qp = Map<String, String>.from(uri.queryParameters);
+    qp['token'] = t;
+
+    return uri.replace(queryParameters: qp).toString();
   }
 
   void _openMembers() {
@@ -240,6 +260,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
 
   Future<void> _init() async {
     final token = await widget.tokenStorage.readToken();
+    _token = token;
     _myUserId = _tryReadSubFromJwt(token);
 
     await _loadInitial();
@@ -372,7 +393,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
   }
 
   Future<void> _connectWs() async {
-    final token = await widget.tokenStorage.readToken();
+    final token = (_token ?? await widget.tokenStorage.readToken());
     if (token == null || token.isEmpty) return;
 
     final wsUrl = 'ws://127.0.0.1:8080/ws';
@@ -857,12 +878,18 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
   }
 
   String _attachmentUrl(ChatAttachment a) {
-    if (a.url != null && a.url!.isNotEmpty) return a.url!;
+    final raw = (a.url ?? '').trim();
+    if (raw.isNotEmpty) {
+      if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
+      if (raw.startsWith('/')) {
+        return 'http://127.0.0.1:8080$raw';
+      }
+    }
     return 'http://127.0.0.1:8080/api/projects/${widget.projectId}/files/${a.id}';
   }
 
   Future<void> _openAttachment(ChatAttachment a) async {
-    final url = _attachmentUrl(a);
+    final url = _externalDownloadUrl(a);
     final uri = Uri.parse(url);
     final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!ok && mounted) {
@@ -1044,38 +1071,138 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     return c;
   }
 
+  bool _isImageAttachment(ChatAttachment a) {
+    final ct = (a.contentType ?? '').toLowerCase();
+    if (ct.startsWith('image/')) return true;
+
+    final name = a.fileName.toLowerCase();
+    return name.endsWith('.png') ||
+        name.endsWith('.jpg') ||
+        name.endsWith('.jpeg') ||
+        name.endsWith('.gif') ||
+        name.endsWith('.webp');
+  }
+
+  Future<void> _openImagePreview(ChatAttachment a) async {
+    final url = _attachmentUrl(a);
+
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.all(12),
+        child: Stack(
+          children: [
+            InteractiveViewer(
+              child: Image.network(
+                url,
+                headers: _authHeaders(),
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) {
+                  return const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('Не удалось загрузить изображение'),
+                  );
+                },
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                },
+              ),
+            ),
+            Positioned(
+              right: 6,
+              top: 6,
+              child: IconButton(
+                onPressed: () => Navigator.pop(ctx),
+                icon: const Icon(Icons.close),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildAttachmentsInMessage(ChatMessage m) {
     if (m.attachments.isEmpty) return const SizedBox.shrink();
+
+    final images = m.attachments.where(_isImageAttachment).toList();
+    final files = m.attachments.where((a) => !_isImageAttachment(a)).toList();
 
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: m.attachments.map((a) {
-          return InkWell(
-            onTap: () => _openAttachment(a),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.attach_file, size: 16),
-                  const SizedBox(width: 6),
-                  Flexible(
-                    child: Text(
-                      a.fileName,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        decoration: TextDecoration.underline,
-                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.9),
+        children: [
+          if (images.isNotEmpty)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: images.map((a) {
+                final url = _attachmentUrl(a);
+
+                return InkWell(
+                  onTap: () => _openImagePreview(a),
+                  onLongPress: () => _openAttachment(a),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      width: 140,
+                      height: 140,
+                      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.10),
+                      child: Image.network(
+                        url,
+                        headers: _authHeaders(),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) {
+                          return const Center(child: Icon(Icons.broken_image_outlined));
+                        },
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+                        },
                       ),
                     ),
                   ),
-                ],
-              ),
+                );
+              }).toList(),
             ),
-          );
-        }).toList(),
+          if (files.isNotEmpty) ...[
+            if (images.isNotEmpty) const SizedBox(height: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: files.map((a) {
+                return InkWell(
+                  onTap: () => _openAttachment(a),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.attach_file, size: 16),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            a.fileName,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              decoration: TextDecoration.underline,
+                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.9),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+        ],
       ),
     );
   }
