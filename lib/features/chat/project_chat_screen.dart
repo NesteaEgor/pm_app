@@ -8,10 +8,12 @@ import 'package:stomp_dart_client/stomp_dart_client.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/storage/token_storage.dart';
+import '../profile/profile_api.dart';
 import 'chat_api.dart';
 import 'chat_message.dart';
 import 'chat_read.dart';
 
+import '../members/project_member.dart';
 import '../members/project_members_api.dart';
 import '../members/project_members_screen.dart';
 
@@ -19,6 +21,7 @@ class _PendingSend {
   final String clientMessageId;
   final String text;
   final List<String> attachmentIds;
+
 
   int attempts = 0;
   DateTime lastAttempt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -97,6 +100,7 @@ class ProjectChatScreen extends StatefulWidget {
   final TokenStorage tokenStorage;
 
   final ProjectMembersApi projectMembersApi;
+  final ProfileApi profileApi;
 
   const ProjectChatScreen({
     super.key,
@@ -105,6 +109,7 @@ class ProjectChatScreen extends StatefulWidget {
     required this.chatApi,
     required this.tokenStorage,
     required this.projectMembersApi,
+    required this.profileApi,
   });
 
   @override
@@ -149,6 +154,9 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
 
   String? _token;
 
+  // NEW: role
+  bool _iAmOwner = false;
+
   @override
   void initState() {
     super.initState();
@@ -184,6 +192,39 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     _stomp?.deactivate();
     super.dispose();
   }
+  String? _avatarUrlForUserId(String? userId) {
+    final id = (userId ?? '').trim();
+    if (id.isEmpty) return null;
+
+    const base = 'http://127.0.0.1:8080';
+    final full = '$base/api/users/$id/avatar';
+
+    final t = (_token ?? '').trim();
+    if (t.isEmpty) return full;
+
+    final uri = Uri.parse(full);
+    final qp = Map<String, String>.from(uri.queryParameters);
+    qp['token'] = t;
+    return uri.replace(queryParameters: qp).toString();
+  }
+
+  Widget _buildUserAvatar(String? userId, {double radius = 14}) {
+    final url = _avatarUrlForUserId(userId);
+
+    if (url == null) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: Colors.white.withValues(alpha: 0.08),
+        child: Icon(Icons.person, size: radius),
+      );
+    }
+
+    return CircleAvatar(
+      radius: radius,
+      backgroundColor: Colors.white.withValues(alpha: 0.08),
+      backgroundImage: NetworkImage(url),
+    );
+  }
 
   Map<String, String> _authHeaders() {
     final t = (_token ?? '').trim();
@@ -211,45 +252,14 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
           projectName: widget.projectName,
           api: widget.projectMembersApi,
           tokenStorage: widget.tokenStorage,
+
+          // NEW:
+          profileApi: widget.profileApi,
         ),
       ),
     );
   }
 
-  void _openReadByDialog(ChatMessage m) {
-    final readers = <String>[];
-    for (final entry in _lastReadMessageAtByUser.entries) {
-      final uid = entry.key;
-      final at = entry.value;
-      if (at.isAfter(m.createdAt) || at.isAtSameMomentAs(m.createdAt)) {
-        readers.add(_userNameByUserId[uid] ?? uid);
-      }
-    }
-    readers.sort();
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Прочитали'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: readers.isEmpty
-              ? const Text('Нет данных')
-              : ListView.builder(
-            shrinkWrap: true,
-            itemCount: readers.length,
-            itemBuilder: (_, i) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Text(readers[i]),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Закрыть')),
-        ],
-      ),
-    );
-  }
 
   void _onScroll() {
     if (_scroll.position.pixels <= 80 && !_loadingMore && _items.isNotEmpty) {
@@ -263,11 +273,25 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     _token = token;
     _myUserId = _tryReadSubFromJwt(token);
 
+    await _loadMyRole(); // NEW
+
     await _loadInitial();
     await _loadReadsInitial();
     await _connectWs();
 
     _maybeSendRead(force: true);
+  }
+
+  Future<void> _loadMyRole() async {
+    try {
+      if (_myUserId == null) return;
+      final members = await widget.projectMembersApi.list(widget.projectId);
+      final me = members.where((m) => m.userId == _myUserId).toList();
+      final owner = me.isNotEmpty && me.first.role == 'OWNER';
+      if (mounted) setState(() => _iAmOwner = owner);
+    } catch (_) {
+      // если не получилось — просто считаем не owner
+    }
   }
 
   String? _tryReadSubFromJwt(String? token) {
@@ -915,7 +939,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     }
   }
 
-  bool _canManageMessage(ChatMessage m) {
+  bool _canEditMessage(ChatMessage m) {
     final isMine = _myUserId != null && m.authorId == _myUserId;
     if (!isMine) return false;
     if (m.status != ChatSendStatus.sent) return false;
@@ -924,7 +948,24 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     return true;
   }
 
+  bool _canDeleteMessage(ChatMessage m) {
+    if (m.status != ChatSendStatus.sent) return false;
+    if (m.id == null) return false;
+    if (m.isDeleted) return false;
+
+    final isMine = _myUserId != null && m.authorId == _myUserId;
+    if (isMine) return true;
+
+    // NEW: owner can delete чужие
+    return _iAmOwner;
+  }
+
   Future<void> _openMessageMenu(ChatMessage m) async {
+    if (m.id == null || m.isDeleted) return;
+
+    final canEdit = _canEditMessage(m);
+    final canDelete = _canDeleteMessage(m);
+
     final act = await showModalBottomSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
@@ -936,16 +977,18 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
               title: const Text('Реакция'),
               onTap: () => Navigator.pop(ctx, 'react'),
             ),
-            ListTile(
-              leading: const Icon(Icons.edit),
-              title: const Text('Редактировать'),
-              onTap: () => Navigator.pop(ctx, 'edit'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_outline),
-              title: const Text('Удалить'),
-              onTap: () => Navigator.pop(ctx, 'delete'),
-            ),
+            if (canEdit)
+              ListTile(
+                leading: const Icon(Icons.edit),
+                title: const Text('Редактировать'),
+                onTap: () => Navigator.pop(ctx, 'edit'),
+              ),
+            if (canDelete)
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: Text(_iAmOwner && m.authorId != _myUserId ? 'Удалить (как OWNER)' : 'Удалить'),
+                onTap: () => Navigator.pop(ctx, 'delete'),
+              ),
           ],
         ),
       ),
@@ -964,6 +1007,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
 
   Future<void> _editMessage(ChatMessage m) async {
     if (m.id == null) return;
+    if (!_canEditMessage(m)) return;
 
     final ctrl = TextEditingController(text: m.text);
 
@@ -1015,12 +1059,15 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
 
   Future<void> _deleteMessage(ChatMessage m) async {
     if (m.id == null) return;
+    if (!_canDeleteMessage(m)) return;
 
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Удалить сообщение?'),
-        content: const Text('Сообщение будет помечено как удалённое.'),
+        content: Text(_iAmOwner && m.authorId != _myUserId
+            ? 'Ты OWNER — можно удалить чужое сообщение. Удаляем?'
+            : 'Сообщение будет помечено как удалённое.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
           FilledButton.tonal(onPressed: () => Navigator.pop(ctx, true), child: const Text('Удалить')),
@@ -1243,6 +1290,41 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
     );
   }
 
+  void _openReadByDialog(ChatMessage m) {
+    final readers = <String>[];
+    for (final entry in _lastReadMessageAtByUser.entries) {
+      final uid = entry.key;
+      final at = entry.value;
+      if (at.isAfter(m.createdAt) || at.isAtSameMomentAs(m.createdAt)) {
+        readers.add(_userNameByUserId[uid] ?? uid);
+      }
+    }
+    readers.sort();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Прочитали'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: readers.isEmpty
+              ? const Text('Нет данных')
+              : ListView.builder(
+            shrinkWrap: true,
+            itemCount: readers.length,
+            itemBuilder: (_, i) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(readers[i]),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Закрыть')),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final typingLine = _typingLineText();
@@ -1281,97 +1363,110 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
         final edited = m.editedAt != null && !m.isDeleted;
         final deleted = m.isDeleted;
 
-        final canManage = _canManageMessage(m);
-
         final readCount = (isMine && !deleted && m.status == ChatSendStatus.sent) ? _readCountForMessage(m) : 0;
         final showRead = isMine && readCount > 0 && m.status == ChatSendStatus.sent && !deleted;
 
+        final canOpenMenu = (m.id != null && !m.isDeleted);
+
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Align(
-            alignment: align,
-            child: GestureDetector(
-              onLongPress: canManage ? () => _openMessageMenu(m) : null,
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 340),
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(14),
-                  color: Colors.white.withValues(alpha: 0.06),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      m.authorName,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    if (m.text.isNotEmpty)
+          child: Row(
+            mainAxisAlignment: isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (!isMine) ...[
+                _buildUserAvatar(m.authorId),
+                const SizedBox(width: 8),
+              ],
+
+              GestureDetector(
+                onLongPress: canOpenMenu ? () => _openMessageMenu(m) : null,
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 320),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    color: Colors.white.withValues(alpha: 0.06),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        m.text,
-                        style: deleted
-                            ? TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
-                          fontStyle: FontStyle.italic,
-                        )
-                            : null,
-                      ),
-                    _buildAttachmentsInMessage(m),
-                    _buildReactionsRow(m, isMine: isMine),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _fmtTime(m.createdAt),
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
-                          ),
+                        m.authorName,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
                         ),
-                        if (edited) ...[
-                          const SizedBox(width: 10),
+                      ),
+                      const SizedBox(height: 4),
+                      if (m.text.isNotEmpty)
+                        Text(
+                          m.text,
+                          style: deleted
+                              ? TextStyle(
+                            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.55),
+                            fontStyle: FontStyle.italic,
+                          )
+                              : null,
+                        ),
+                      _buildAttachmentsInMessage(m),
+                      _buildReactionsRow(m, isMine: isMine),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
                           Text(
-                            'edited',
+                            _fmtTime(m.createdAt),
                             style: TextStyle(
                               fontSize: 11,
                               color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                             ),
                           ),
-                        ],
-                        if (statusText.isNotEmpty) ...[
-                          const SizedBox(width: 10),
-                          Text(
-                            statusText,
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
-                            ),
-                          ),
-                        ],
-                        if (showRead) ...[
-                          const SizedBox(width: 10),
-                          InkWell(
-                            onTap: () => _openReadByDialog(m),
-                            child: Text(
-                              'прочитано: $readCount',
+                          if (edited) ...[
+                            const SizedBox(width: 10),
+                            Text(
+                              'edited',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
                               ),
                             ),
-                          ),
+                          ],
+                          if (statusText.isNotEmpty) ...[
+                            const SizedBox(width: 10),
+                            Text(
+                              statusText,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                              ),
+                            ),
+                          ],
+                          if (showRead) ...[
+                            const SizedBox(width: 10),
+                            InkWell(
+                              onTap: () => _openReadByDialog(m),
+                              child: Text(
+                                'прочитано: $readCount',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
-                    ),
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
+
+              if (isMine) ...[
+                const SizedBox(width: 8),
+                _buildUserAvatar(_myUserId ?? 'me'),
+              ],
+            ],
           ),
         );
       },
@@ -1379,7 +1474,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Чат: ${widget.projectName}'),
+        title: Text('Чат: ${widget.projectName}${_iAmOwner ? ' • OWNER' : ''}'),
         actions: [
           IconButton(
             tooltip: 'Участники проекта',

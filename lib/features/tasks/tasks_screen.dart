@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../core/storage/token_storage.dart';
+import '../members/project_members_api.dart';
+
 import 'create_task_dialog.dart';
 import 'edit_task_dialog.dart';
 import 'task.dart';
@@ -7,6 +10,7 @@ import 'tasks_api.dart';
 
 import '../comments/comments_api.dart';
 import '../comments/comments_screen.dart';
+import '../members/project_members_api.dart';
 
 enum TaskFilter { all, todo, inProgress, done }
 enum TaskSortMode { deadlineAsc, createdAtDesc }
@@ -17,12 +21,20 @@ class TasksScreen extends StatefulWidget {
   final TasksApi tasksApi;
   final CommentsApi commentsApi;
 
+  // NEW: нужно для owner-delete в CommentsScreen
+  final TokenStorage tokenStorage;
+  final ProjectMembersApi projectMembersApi;
+
   const TasksScreen({
     super.key,
     required this.projectId,
     required this.projectName,
     required this.tasksApi,
     required this.commentsApi,
+
+    // ✅ NEW
+    required this.tokenStorage,
+    required this.projectMembersApi,
   });
 
   @override
@@ -154,6 +166,10 @@ class _TasksScreenState extends State<TasksScreen> {
           taskId: t.id,
           taskTitle: t.title,
           commentsApi: widget.commentsApi,
+
+          // ✅ NEW: теперь owner-delete реально работает
+          tokenStorage: widget.tokenStorage,
+          projectMembersApi: widget.projectMembersApi,
         ),
       ),
     );

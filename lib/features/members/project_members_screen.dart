@@ -4,6 +4,11 @@ import 'package:flutter/material.dart';
 
 import '../../core/storage/token_storage.dart';
 import '../../core/ui/glass.dart';
+
+import '../profile/profile_api.dart';
+import '../profile/profile_screen.dart';
+import '../profile/user_profile_screen.dart';
+
 import 'project_member.dart';
 import 'project_members_api.dart';
 
@@ -13,12 +18,16 @@ class ProjectMembersScreen extends StatefulWidget {
   final ProjectMembersApi api;
   final TokenStorage tokenStorage;
 
+  // NEW:
+  final ProfileApi profileApi;
+
   const ProjectMembersScreen({
     super.key,
     required this.projectId,
     required this.projectName,
     required this.api,
     required this.tokenStorage,
+    required this.profileApi,
   });
 
   @override
@@ -30,6 +39,7 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
   Future<List<ProjectMember>>? _future;
 
   String? _myUserId;
+  String? _token;
 
   @override
   void initState() {
@@ -46,6 +56,7 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
 
   Future<void> _initMe() async {
     final token = await widget.tokenStorage.readToken();
+    _token = token;
     _myUserId = _tryReadSubFromJwt(token);
     if (mounted) setState(() {});
   }
@@ -70,6 +81,43 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
     setState(() {
       _future = widget.api.list(widget.projectId);
     });
+  }
+
+  String? _avatarUrlWithToken(String userId) {
+    final t = (_token ?? '').trim();
+    if (t.isEmpty) return null;
+
+    const base = 'http://127.0.0.1:8080';
+    return '$base/api/users/$userId/avatar?token=$t';
+  }
+
+  void _openProfile(ProjectMember m) {
+    final isMe = _myUserId != null && m.userId == _myUserId;
+
+    if (isMe) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ProfileScreen(
+            profileApi: widget.profileApi,
+            tokenStorage: widget.tokenStorage,
+          ),
+        ),
+      );
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => UserProfileScreen(
+          userId: m.userId,
+          profileApi: widget.profileApi,
+          tokenStorage: widget.tokenStorage,
+          initialDisplayName: m.displayName,
+          initialEmail: m.email,
+          initialRole: m.role,
+        ),
+      ),
+    );
   }
 
   Future<void> _invite(String email) async {
@@ -142,7 +190,6 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
                     ],
                   ),
                 ),
-
               Expanded(
                 child: ListView.separated(
                   padding: const EdgeInsets.all(12),
@@ -153,12 +200,25 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
                     final isOwner = m.role == 'OWNER';
                     final canRemove = iAmOwner && !isOwner;
 
+                    final avatarUrl = _avatarUrlWithToken(m.userId);
+
                     return Glass(
                       child: ListTile(
-                        leading: Icon(isOwner ? Icons.verified : Icons.person_outline),
+                        leading: InkWell(
+                          onTap: () => _openProfile(m),
+                          child: CircleAvatar(
+                            radius: 18,
+                            backgroundColor: Colors.white.withValues(alpha: 0.08),
+                            backgroundImage: avatarUrl == null ? null : NetworkImage(avatarUrl),
+                            child: avatarUrl == null
+                                ? Icon(isOwner ? Icons.verified : Icons.person_outline, size: 18)
+                                : null,
+                          ),
+                        ),
                         title: Text(m.displayName),
                         subtitle: Text('${m.email}\n${m.role}'),
                         isThreeLine: true,
+                        onTap: () => _openProfile(m),
                         trailing: canRemove
                             ? IconButton(
                           tooltip: 'Удалить',

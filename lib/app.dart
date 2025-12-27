@@ -15,6 +15,8 @@ import 'features/chat/chat_api.dart';
 
 import 'features/members/project_members_api.dart';
 
+import 'features/profile/profile_api.dart';
+
 class App extends StatefulWidget {
   const App({super.key});
 
@@ -34,6 +36,8 @@ class _AppState extends State<App> {
 
   late final ProjectMembersApi projectMembersApi;
 
+  late final ProfileApi profileApi;
+
   @override
   void initState() {
     super.initState();
@@ -52,10 +56,11 @@ class _AppState extends State<App> {
     projectsApi = ProjectsApi(api: apiClient);
     tasksApi = TasksApi(api: apiClient);
     commentsApi = CommentsApi(api: apiClient);
-
     chatApi = ChatApi(api: apiClient);
-
     projectMembersApi = ProjectMembersApi(api: apiClient);
+
+    // FIX: ProfileApi принимает только ApiClient
+    profileApi = ProfileApi(api: apiClient);
   }
 
   Future<bool> _hasToken() async {
@@ -98,14 +103,12 @@ class _AppState extends State<App> {
             projectsApi: projectsApi,
             tasksApi: tasksApi,
             commentsApi: commentsApi,
-
             chatApi: chatApi,
             tokenStorage: tokenStorage,
-
             projectMembersApi: projectMembersApi,
-
             authApi: authApi,
             onLoggedOut: () => setState(() {}),
+            profileApi: profileApi,
           );
         },
       ),

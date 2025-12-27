@@ -19,6 +19,9 @@ import 'projects_api.dart';
 
 import '../members/project_members_api.dart';
 
+import '../profile/profile_api.dart';
+import '../profile/profile_screen.dart';
+
 class ProjectsScreen extends StatefulWidget {
   final ProjectsApi projectsApi;
   final TasksApi tasksApi;
@@ -32,6 +35,8 @@ class ProjectsScreen extends StatefulWidget {
   final AuthApi authApi;
   final VoidCallback onLoggedOut;
 
+  final ProfileApi profileApi;
+
   const ProjectsScreen({
     super.key,
     required this.projectsApi,
@@ -42,6 +47,7 @@ class ProjectsScreen extends StatefulWidget {
     required this.projectMembersApi,
     required this.authApi,
     required this.onLoggedOut,
+    required this.profileApi,
   });
 
   @override
@@ -83,10 +89,14 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           chatApi: widget.chatApi,
           tokenStorage: widget.tokenStorage,
           projectMembersApi: widget.projectMembersApi,
+
+          // NEW:
+          profileApi: widget.profileApi,
         ),
       ),
     );
   }
+
 
   void _openTasks(Project p) {
     Navigator.of(context).push(
@@ -96,6 +106,21 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           projectName: p.name,
           tasksApi: widget.tasksApi,
           commentsApi: widget.commentsApi,
+
+          // нужно, чтобы CommentsScreen мог понять кто OWNER
+          tokenStorage: widget.tokenStorage,
+          projectMembersApi: widget.projectMembersApi,
+        ),
+      ),
+    );
+  }
+
+  void _openProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProfileScreen(
+          profileApi: widget.profileApi,
+          tokenStorage: widget.tokenStorage,
         ),
       ),
     );
@@ -117,7 +142,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           ),
           const Positioned(top: -120, left: -80, child: _Blob(size: 260)),
           const Positioned(bottom: -140, right: -90, child: _Blob(size: 300)),
-
           SafeArea(
             child: Column(
               children: [
@@ -131,6 +155,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                       ),
                       const Spacer(),
                       IconButton(
+                        tooltip: 'Профиль',
+                        onPressed: _openProfile,
+                        icon: const Icon(Icons.person_outline),
+                      ),
+                      IconButton(
+                        tooltip: 'Выйти',
                         onPressed: () async {
                           await widget.authApi.logout();
                           widget.onLoggedOut();
@@ -140,7 +170,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                     ],
                   ),
                 ),
-
                 Expanded(
                   child: RefreshIndicator(
                     onRefresh: _refresh,

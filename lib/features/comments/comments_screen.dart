@@ -1,4 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+
+import '../../core/storage/token_storage.dart';
+import '../members/project_members_api.dart';
+
 import 'comment.dart';
 import 'comments_api.dart';
 
@@ -8,12 +13,18 @@ class CommentsScreen extends StatefulWidget {
   final String taskTitle;
   final CommentsApi commentsApi;
 
+  // теперь ВСЕГДА передаём — чтобы работало "по-настоящему"
+  final TokenStorage tokenStorage;
+  final ProjectMembersApi projectMembersApi;
+
   const CommentsScreen({
     super.key,
     required this.projectId,
     required this.taskId,
     required this.taskTitle,
     required this.commentsApi,
+    required this.tokenStorage,
+    required this.projectMembersApi,
   });
 
   @override
@@ -30,10 +41,18 @@ class _CommentsScreenState extends State<CommentsScreen> {
 
   List<Comment> _items = [];
 
+  String? _myUserId;
+  bool _iAmOwner = false;
+
   @override
   void initState() {
     super.initState();
-    _load();
+    _init();
+  }
+
+  Future<void> _init() async {
+    await _initRole();
+    await _load();
   }
 
   @override
@@ -41,6 +60,43 @@ class _CommentsScreenState extends State<CommentsScreen> {
     _ctrl.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  Future<void> _initRole() async {
+    try {
+      final token = await widget.tokenStorage.readToken();
+      _myUserId = _tryReadSubFromJwt(token);
+      if (_myUserId == null) return;
+
+      final members = await widget.projectMembersApi.list(widget.projectId);
+      final me = members.where((m) => m.userId == _myUserId).toList();
+      final owner = me.isNotEmpty && me.first.role == 'OWNER';
+
+      if (mounted) setState(() => _iAmOwner = owner);
+    } catch (_) {
+      // если не удалось — просто считаем что не OWNER
+    }
+  }
+
+  String? _tryReadSubFromJwt(String? token) {
+    if (token == null || token.isEmpty) return null;
+    final parts = token.split('.');
+    if (parts.length < 2) return null;
+
+    try {
+      final payload = parts[1];
+      final norm = base64.normalize(payload);
+      final jsonStr = utf8.decode(base64Url.decode(norm));
+      final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+      return map['sub']?.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _canDelete(Comment c) {
+    final isMine = _myUserId != null && c.authorId == _myUserId;
+    return isMine || _iAmOwner;
   }
 
   String _fmt(DateTime dt) {
@@ -77,9 +133,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
     }
   }
 
-  Future<void> _refresh() async {
-    await _load();
-  }
+  Future<void> _refresh() async => _load();
 
   void _jumpToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -103,9 +157,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
       _ctrl.clear();
 
       if (!mounted) return;
-      setState(() {
-        _items = [..._items, created];
-      });
+      setState(() => _items = [..._items, created]);
 
       _jumpToBottom();
     } catch (e) {
@@ -119,6 +171,13 @@ class _CommentsScreenState extends State<CommentsScreen> {
   }
 
   Future<void> _delete(Comment c) async {
+    if (!_canDelete(c)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Удалять можно только свои комментарии (или OWNER).')),
+      );
+      return;
+    }
+
     try {
       await widget.commentsApi.delete(
         projectId: widget.projectId,
@@ -142,7 +201,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Комментарии: ${widget.taskTitle}'),
+        title: Text('Комментарии: ${widget.taskTitle}${_iAmOwner ? ' • OWNER' : ''}'),
         actions: [
           IconButton(
             tooltip: 'Обновить',
@@ -158,9 +217,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
               onRefresh: _refresh,
               child: Builder(
                 builder: (_) {
-                  if (_loading) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
+                  if (_loading) return const Center(child: CircularProgressIndicator());
 
                   if (_error != null) {
                     return ListView(
@@ -201,13 +258,15 @@ class _CommentsScreenState extends State<CommentsScreen> {
                     separatorBuilder: (_, __) => const SizedBox(height: 8),
                     itemBuilder: (context, i) {
                       final c = _items[i];
+                      final canDel = _canDelete(c);
+
                       return ListTile(
                         title: Text(c.text),
                         subtitle: Text(_fmt(c.createdAt)),
                         trailing: IconButton(
-                          tooltip: 'Удалить (только свой)',
+                          tooltip: canDel ? 'Удалить' : 'Удалить можно только свой',
                           icon: const Icon(Icons.delete_outline),
-                          onPressed: () => _delete(c),
+                          onPressed: canDel ? () => _delete(c) : null,
                         ),
                       );
                     },
@@ -216,7 +275,6 @@ class _CommentsScreenState extends State<CommentsScreen> {
               ),
             ),
           ),
-
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
             child: Row(
