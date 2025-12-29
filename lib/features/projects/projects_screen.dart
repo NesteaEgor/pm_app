@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../../core/ui/glass.dart';
@@ -57,15 +59,75 @@ class ProjectsScreen extends StatefulWidget {
 class _ProjectsScreenState extends State<ProjectsScreen> {
   late Future<List<Project>> _future;
 
+  String? _myUserId;
+
+  // projectId -> i am owner?
+  final Map<String, bool> _iAmOwnerByProjectId = {};
+  final Set<String> _ownerLoading = {};
+
   @override
   void initState() {
     super.initState();
     _future = widget.projectsApi.list();
+    _initMe();
+  }
+
+  Future<void> _initMe() async {
+    final token = await widget.tokenStorage.readToken();
+    final uid = _tryReadSubFromJwt(token);
+    if (!mounted) return;
+    setState(() => _myUserId = uid);
+  }
+
+  String? _tryReadSubFromJwt(String? token) {
+    if (token == null || token.isEmpty) return null;
+    final parts = token.split('.');
+    if (parts.length < 2) return null;
+
+    try {
+      final payload = parts[1];
+      final norm = base64.normalize(payload);
+      final jsonStr = utf8.decode(base64Url.decode(norm));
+      final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+      return map['sub']?.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _ensureOwnerLoaded(String projectId) async {
+    if (_myUserId == null || _myUserId!.isEmpty) return;
+
+    if (_iAmOwnerByProjectId.containsKey(projectId)) return;
+    if (_ownerLoading.contains(projectId)) return;
+
+    _ownerLoading.add(projectId);
+
+    try {
+      final members = await widget.projectMembersApi.list(projectId);
+      final me = members.where((m) => m.userId == _myUserId).toList();
+      final isOwner = me.isNotEmpty && me.first.role == 'OWNER';
+
+      if (!mounted) return;
+      setState(() {
+        _iAmOwnerByProjectId[projectId] = isOwner;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      // если не смогли — считаем не owner (скроем корзину)
+      setState(() {
+        _iAmOwnerByProjectId[projectId] = false;
+      });
+    } finally {
+      _ownerLoading.remove(projectId);
+    }
   }
 
   Future<void> _refresh() async {
     setState(() {
       _future = widget.projectsApi.list();
+      _iAmOwnerByProjectId.clear();
+      _ownerLoading.clear();
     });
     await _future;
   }
@@ -89,14 +151,11 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           chatApi: widget.chatApi,
           tokenStorage: widget.tokenStorage,
           projectMembersApi: widget.projectMembersApi,
-
-          // NEW:
           profileApi: widget.profileApi,
         ),
       ),
     );
   }
-
 
   void _openTasks(Project p) {
     Navigator.of(context).push(
@@ -106,8 +165,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
           projectName: p.name,
           tasksApi: widget.tasksApi,
           commentsApi: widget.commentsApi,
-
-          // нужно, чтобы CommentsScreen мог понять кто OWNER
           tokenStorage: widget.tokenStorage,
           projectMembersApi: widget.projectMembersApi,
         ),
@@ -230,6 +287,12 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                           separatorBuilder: (_, __) => const SizedBox(height: 12),
                           itemBuilder: (context, i) {
                             final p = projects[i];
+
+                            // лениво подгружаем owner-флаг (1 раз на проект)
+                            _ensureOwnerLoaded(p.id);
+
+                            final iAmOwner = _iAmOwnerByProjectId[p.id] == true;
+
                             return Glass(
                               child: ListTile(
                                 title: Text(
@@ -245,22 +308,23 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
                                       icon: const Icon(Icons.chat_bubble_outline),
                                       onPressed: () => _openChat(p),
                                     ),
-                                    IconButton(
-                                      tooltip: 'Удалить проект',
-                                      icon: const Icon(Icons.delete_outline),
-                                      onPressed: () async {
-                                        try {
-                                          await widget.projectsApi.delete(p.id);
-                                          if (!mounted) return;
-                                          await _refresh();
-                                        } catch (e) {
-                                          if (!mounted) return;
-                                          ScaffoldMessenger.of(context).showSnackBar(
-                                            SnackBar(content: Text('Не удалось удалить: $e')),
-                                          );
-                                        }
-                                      },
-                                    ),
+                                    if (iAmOwner)
+                                      IconButton(
+                                        tooltip: 'Удалить проект',
+                                        icon: const Icon(Icons.delete_outline),
+                                        onPressed: () async {
+                                          try {
+                                            await widget.projectsApi.delete(p.id);
+                                            if (!mounted) return;
+                                            await _refresh();
+                                          } catch (e) {
+                                            if (!mounted) return;
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text('Не удалось удалить: $e')),
+                                            );
+                                          }
+                                        },
+                                      ),
                                   ],
                                 ),
                                 onTap: () => _openTasks(p),

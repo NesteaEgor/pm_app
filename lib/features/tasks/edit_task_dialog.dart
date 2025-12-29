@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../members/project_member.dart';
+import '../members/project_members_api.dart';
+
 import 'task.dart';
 import 'tasks_api.dart';
 
@@ -8,11 +11,14 @@ class EditTaskDialog extends StatefulWidget {
   final Task task;
   final TasksApi tasksApi;
 
+  final ProjectMembersApi projectMembersApi;
+
   const EditTaskDialog({
     super.key,
     required this.projectId,
     required this.task,
     required this.tasksApi,
+    required this.projectMembersApi,
   });
 
   @override
@@ -26,16 +32,26 @@ class _EditTaskDialogState extends State<EditTaskDialog> {
   bool _loading = false;
   String? _error;
 
-  DateTime? _deadlineLocal; // держим локально для UI
+  DateTime? _deadlineLocal;
   late TaskStatus _status;
+
+  List<ProjectMember> _members = [];
+  bool _membersLoading = true;
+
+  String? _assigneeId;
 
   @override
   void initState() {
     super.initState();
+
     _title = TextEditingController(text: widget.task.title);
     _desc = TextEditingController(text: widget.task.description ?? '');
     _deadlineLocal = widget.task.deadline?.toLocal();
     _status = widget.task.status;
+
+    _assigneeId = widget.task.assigneeId;
+
+    _loadMembers();
   }
 
   @override
@@ -43,6 +59,25 @@ class _EditTaskDialogState extends State<EditTaskDialog> {
     _title.dispose();
     _desc.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadMembers() async {
+    setState(() => _membersLoading = true);
+    try {
+      final list = await widget.projectMembersApi.list(widget.projectId);
+      list.sort((a, b) => a.displayName.compareTo(b.displayName));
+      if (!mounted) return;
+      setState(() {
+        _members = list;
+        _membersLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _membersLoading = false;
+        _error = 'Не удалось загрузить участников: $e';
+      });
+    }
   }
 
   String _fmt(DateTime dt) {
@@ -82,16 +117,12 @@ class _EditTaskDialogState extends State<EditTaskDialog> {
       return;
     }
 
-    // собираем PATCH только из того, что реально изменилось
     final patch = <String, dynamic>{};
 
     if (newTitle != widget.task.title) patch['title'] = newTitle;
 
     final oldDesc = (widget.task.description ?? '').trim();
-    if (newDesc != oldDesc) {
-      // если юзер стер описание — отправим пустую строку (на бэке решишь: хранить "" или null)
-      patch['description'] = newDesc;
-    }
+    if (newDesc != oldDesc) patch['description'] = newDesc;
 
     if (_status != widget.task.status) {
       patch['status'] = taskStatusToString(_status);
@@ -100,15 +131,19 @@ class _EditTaskDialogState extends State<EditTaskDialog> {
     final oldDeadline = widget.task.deadline?.toLocal();
     final sameDeadline =
         (oldDeadline == null && _deadlineLocal == null) ||
-            (oldDeadline != null && _deadlineLocal != null && oldDeadline.isAtSameMomentAs(_deadlineLocal!));
+            (oldDeadline != null &&
+                _deadlineLocal != null &&
+                oldDeadline.isAtSameMomentAs(_deadlineLocal!));
 
     if (!sameDeadline) {
-      // если убрали дедлайн — отправим null
-      patch['deadline'] = _deadlineLocal; // TasksApi.patch сам правильно сериализует DateTime/null
+      patch['deadline'] = _deadlineLocal;
+    }
+
+    if (_assigneeId != widget.task.assigneeId) {
+      patch['assigneeId'] = _assigneeId; // null = снять исполнителя
     }
 
     if (patch.isEmpty) {
-      // Ничего не меняли — просто закрываем
       if (!mounted) return;
       Navigator.of(context).pop<Task>(widget.task);
       return;
@@ -136,6 +171,26 @@ class _EditTaskDialogState extends State<EditTaskDialog> {
     }
   }
 
+  List<DropdownMenuItem<String?>> _assigneeItems() {
+    final items = <DropdownMenuItem<String?>>[
+      const DropdownMenuItem<String?>(
+        value: null,
+        child: Text('Не назначен'),
+      ),
+    ];
+
+    for (final m in _members) {
+      items.add(
+        DropdownMenuItem<String?>(
+          value: m.userId,
+          child: Text(m.displayName),
+        ),
+      );
+    }
+
+    return items;
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -152,7 +207,6 @@ class _EditTaskDialogState extends State<EditTaskDialog> {
             decoration: const InputDecoration(labelText: 'Описание'),
           ),
           const SizedBox(height: 12),
-
           DropdownButtonFormField<TaskStatus>(
             value: _status,
             decoration: const InputDecoration(labelText: 'Статус'),
@@ -165,6 +219,14 @@ class _EditTaskDialogState extends State<EditTaskDialog> {
             )
                 .toList(),
             onChanged: _loading ? null : (v) => setState(() => _status = v ?? _status),
+          ),
+          const SizedBox(height: 12),
+
+          DropdownButtonFormField<String?>(
+            value: _assigneeId,
+            decoration: const InputDecoration(labelText: 'Исполнитель'),
+            items: _membersLoading ? null : _assigneeItems(),
+            onChanged: (_loading || _membersLoading) ? null : (v) => setState(() => _assigneeId = v),
           ),
 
           const SizedBox(height: 12),

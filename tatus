@@ -1,0 +1,39 @@
+[33mcommit ab1958aa5119f4aac5fa1bffd8b46ffe363ef0b0[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m)[m
+Author:     NesteaEgor <ENesterovvvz2004@yandex.ru>
+AuthorDate: Sat Dec 27 21:01:25 2025 +0300
+Commit:     NesteaEgor <ENesterovvvz2004@yandex.ru>
+CommitDate: Sat Dec 27 21:01:25 2025 +0300
+
+    Profile screen
+
+[33mcommit 1135f63270898f730876c64c7eeb393858131583[m
+Author:     NesteaEgor <ENesterovvvz2004@yandex.ru>
+AuthorDate: Thu Dec 25 18:26:52 2025 +0300
+Commit:     NesteaEgor <ENesterovvvz2004@yandex.ru>
+CommitDate: Thu Dec 25 18:26:52 2025 +0300
+
+    Chat add UX ability to send attachments
+
+[33mcommit bd54e6ebeefa8368112f197061bc819b5d119137[m
+Author:     NesteaEgor <ENesterovvvz2004@yandex.ru>
+AuthorDate: Tue Dec 23 23:44:28 2025 +0300
+Commit:     NesteaEgor <ENesterovvvz2004@yandex.ru>
+CommitDate: Tue Dec 23 23:44:28 2025 +0300
+
+    Add UX chat reaction and typing report
+
+[33mcommit 857c1fcfe0dcd83b1883837a6de65f09a61481b3[m
+Author:     NesteaEgor <ENesterovvvz2004@yandex.ru>
+AuthorDate: Wed Dec 17 18:55:46 2025 +0300
+Commit:     NesteaEgor <ENesterovvvz2004@yandex.ru>
+CommitDate: Wed Dec 17 18:55:46 2025 +0300
+
+    Chat UX and report updated
+
+[33mcommit 377497e111ee20bddb45674299eb3eea6a34f088[m
+Author:     NesteaEgor <ENesterovvvz2004@yandex.ru>
+AuthorDate: Mon Dec 15 02:48:53 2025 +0300
+Commit:     NesteaEgor <ENesterovvvz2004@yandex.ru>
+CommitDate: Mon Dec 15 02:48:53 2025 +0300
+
+    Chat new functions

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../../core/storage/token_storage.dart';
@@ -10,9 +12,8 @@ import 'tasks_api.dart';
 
 import '../comments/comments_api.dart';
 import '../comments/comments_screen.dart';
-import '../members/project_members_api.dart';
 
-enum TaskFilter { all, todo, inProgress, done }
+enum TaskFilter { all, todo, inProgress, done, myReported, myAssigned }
 enum TaskSortMode { deadlineAsc, createdAtDesc }
 
 class TasksScreen extends StatefulWidget {
@@ -21,7 +22,6 @@ class TasksScreen extends StatefulWidget {
   final TasksApi tasksApi;
   final CommentsApi commentsApi;
 
-  // NEW: нужно для owner-delete в CommentsScreen
   final TokenStorage tokenStorage;
   final ProjectMembersApi projectMembersApi;
 
@@ -31,8 +31,6 @@ class TasksScreen extends StatefulWidget {
     required this.projectName,
     required this.tasksApi,
     required this.commentsApi,
-
-    // ✅ NEW
     required this.tokenStorage,
     required this.projectMembersApi,
   });
@@ -50,15 +48,56 @@ class _TasksScreenState extends State<TasksScreen> {
   TaskFilter _filter = TaskFilter.all;
   TaskSortMode _sortMode = TaskSortMode.deadlineAsc;
 
+  String? _myUserId;
+  bool _iAmOwner = false;
+
   @override
   void initState() {
     super.initState();
-    _load();
+    _init();
+  }
+
+  Future<void> _init() async {
+    final token = await widget.tokenStorage.readToken();
+    _myUserId = _tryReadSubFromJwt(token);
+
+    await _loadMyRole();
+    await _load();
+  }
+
+  Future<void> _loadMyRole() async {
+    try {
+      if (_myUserId == null) return;
+      final members = await widget.projectMembersApi.list(widget.projectId);
+      final me = members.where((m) => m.userId == _myUserId).toList();
+      final owner = me.isNotEmpty && me.first.role == 'OWNER';
+      if (mounted) setState(() => _iAmOwner = owner);
+    } catch (_) {
+      if (mounted) setState(() => _iAmOwner = false);
+    }
+  }
+
+  String? _tryReadSubFromJwt(String? token) {
+    if (token == null || token.isEmpty) return null;
+    final parts = token.split('.');
+    if (parts.length < 2) return null;
+
+    try {
+      final payload = parts[1];
+      final norm = base64.normalize(payload);
+      final jsonStr = utf8.decode(base64Url.decode(norm));
+      final map = jsonDecode(jsonStr) as Map<String, dynamic>;
+      return map['sub']?.toString();
+    } catch (_) {
+      return null;
+    }
   }
 
   String? _statusParam() {
     switch (_filter) {
       case TaskFilter.all:
+      case TaskFilter.myReported:
+      case TaskFilter.myAssigned:
         return null;
       case TaskFilter.todo:
         return 'TODO';
@@ -69,13 +108,31 @@ class _TasksScreenState extends State<TasksScreen> {
     }
   }
 
+  List<Task> _applyLocalFilter(List<Task> list) {
+    final me = _myUserId;
+    if (me == null || me.isEmpty) {
+      if (_filter == TaskFilter.myReported || _filter == TaskFilter.myAssigned) {
+        return <Task>[];
+      }
+      return list;
+    }
+
+    switch (_filter) {
+      case TaskFilter.myReported:
+        return list.where((t) => t.reporterId == me).toList();
+      case TaskFilter.myAssigned:
+        return list.where((t) => t.assigneeId == me).toList();
+      default:
+        return list;
+    }
+  }
+
   void _applyLocalSort(List<Task> list) {
     if (_sortMode == TaskSortMode.createdAtDesc) {
       list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       return;
     }
 
-    // deadlineAsc: null дедлайны — в конец
     final farFuture = DateTime(9999, 12, 31, 23, 59);
     DateTime da(Task t) => t.deadline?.toLocal() ?? farFuture;
 
@@ -100,12 +157,13 @@ class _TasksScreenState extends State<TasksScreen> {
       final status = _statusParam();
       final sortParam = _sortMode == TaskSortMode.deadlineAsc ? 'deadline' : null;
 
-      final list = await widget.tasksApi.list(
+      final listRaw = await widget.tasksApi.list(
         widget.projectId,
         status: status,
         sort: sortParam,
       );
 
+      final list = _applyLocalFilter(listRaw);
       _applyLocalSort(list);
 
       if (!mounted) return;
@@ -133,6 +191,7 @@ class _TasksScreenState extends State<TasksScreen> {
       builder: (_) => CreateTaskDialog(
         projectId: widget.projectId,
         tasksApi: widget.tasksApi,
+        projectMembersApi: widget.projectMembersApi,
       ),
     );
 
@@ -149,6 +208,7 @@ class _TasksScreenState extends State<TasksScreen> {
         projectId: widget.projectId,
         task: t,
         tasksApi: widget.tasksApi,
+        projectMembersApi: widget.projectMembersApi,
       ),
     );
 
@@ -166,8 +226,6 @@ class _TasksScreenState extends State<TasksScreen> {
           taskId: t.id,
           taskTitle: t.title,
           commentsApi: widget.commentsApi,
-
-          // ✅ NEW: теперь owner-delete реально работает
           tokenStorage: widget.tokenStorage,
           projectMembersApi: widget.projectMembersApi,
         ),
@@ -238,6 +296,10 @@ class _TasksScreenState extends State<TasksScreen> {
         return 'IN_PROGRESS';
       case TaskFilter.done:
         return 'DONE';
+      case TaskFilter.myReported:
+        return 'REPORTER';
+      case TaskFilter.myAssigned:
+        return 'ASSIGNEE';
     }
   }
 
@@ -301,6 +363,17 @@ class _TasksScreenState extends State<TasksScreen> {
                 checked: _filter == TaskFilter.done,
                 child: const Text('DONE'),
               ),
+              const PopupMenuDivider(),
+              CheckedPopupMenuItem(
+                value: TaskFilter.myReported,
+                checked: _filter == TaskFilter.myReported,
+                child: const Text('Постановщик (я)'),
+              ),
+              CheckedPopupMenuItem(
+                value: TaskFilter.myAssigned,
+                checked: _filter == TaskFilter.myAssigned,
+                child: const Text('Исполнитель (я)'),
+              ),
             ],
           ),
           PopupMenuButton<TaskSortMode>(
@@ -343,10 +416,7 @@ class _TasksScreenState extends State<TasksScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             const SizedBox(height: 80),
-            Text(
-              'Ошибка:\n$_error',
-              textAlign: TextAlign.center,
-            ),
+            Text('Ошибка:\n$_error', textAlign: TextAlign.center),
             const SizedBox(height: 12),
             Center(
               child: FilledButton(
@@ -376,9 +446,26 @@ class _TasksScreenState extends State<TasksScreen> {
           itemBuilder: (context, i) {
             final t = _tasks[i];
 
+            final me = _myUserId;
+            final isReporter = (me != null && me.isNotEmpty && t.reporterId == me);
+            final isAssignee = (me != null && me.isNotEmpty && t.assigneeId == me);
+
+            final canAll = _iAmOwner || isReporter;
+            final canEdit = canAll;
+            final canDelete = canAll;
+
+            final canChangeStatus = _iAmOwner || isReporter || isAssignee;
+
             final lines = <String>[];
             final desc = (t.description ?? '').trim();
             if (desc.isNotEmpty) lines.add(desc);
+
+            final rep = (t.reporterName ?? '').trim();
+            if (rep.isNotEmpty) lines.add('Постановщик: $rep');
+
+            final ass = (t.assigneeName ?? '').trim();
+            if (ass.isNotEmpty) lines.add('Исполнитель: $ass');
+
             if (t.deadline != null) {
               lines.add('Дедлайн: ${_fmtDeadline(t.deadline!.toLocal())}');
             }
@@ -395,49 +482,51 @@ class _TasksScreenState extends State<TasksScreen> {
                     icon: const Icon(Icons.chat_bubble_outline),
                     onPressed: () => _openComments(t),
                   ),
-                  IconButton(
-                    tooltip: 'Сменить статус',
-                    icon: const Icon(Icons.autorenew),
-                    onPressed: () async {
-                      try {
-                        final next = _nextStatus(t.status);
-                        await widget.tasksApi.patch(
-                          widget.projectId,
-                          t.id,
-                          {'status': taskStatusToString(next)},
-                        );
-                        if (!mounted) return;
-                        await _load(showSpinner: false);
-                      } catch (e) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Ошибка: $e')),
-                        );
-                      }
-                    },
-                  ),
-                  IconButton(
-                    tooltip: 'Удалить',
-                    icon: const Icon(Icons.delete_outline),
-                    onPressed: () async {
-                      final ok = await _confirmDelete(t);
-                      if (!ok) return;
+                  if (canChangeStatus)
+                    IconButton(
+                      tooltip: 'Сменить статус',
+                      icon: const Icon(Icons.autorenew),
+                      onPressed: () async {
+                        try {
+                          final next = _nextStatus(t.status);
+                          await widget.tasksApi.patch(
+                            widget.projectId,
+                            t.id,
+                            {'status': taskStatusToString(next)},
+                          );
+                          if (!mounted) return;
+                          await _load(showSpinner: false);
+                        } catch (e) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Ошибка: $e')),
+                          );
+                        }
+                      },
+                    ),
+                  if (canDelete)
+                    IconButton(
+                      tooltip: 'Удалить',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () async {
+                        final ok = await _confirmDelete(t);
+                        if (!ok) return;
 
-                      try {
-                        await widget.tasksApi.delete(widget.projectId, t.id);
-                        if (!mounted) return;
-                        await _load(showSpinner: false);
-                      } catch (e) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Ошибка: $e')),
-                        );
-                      }
-                    },
-                  ),
+                        try {
+                          await widget.tasksApi.delete(widget.projectId, t.id);
+                          if (!mounted) return;
+                          await _load(showSpinner: false);
+                        } catch (e) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Ошибка: $e')),
+                          );
+                        }
+                      },
+                    ),
                 ],
               ),
-              onTap: () => _openEditDialog(t),
+              onTap: canEdit ? () => _openEditDialog(t) : null,
             );
           },
         ),

@@ -24,6 +24,7 @@ class TasksApi {
         required String title,
         String? description,
         DateTime? deadline,
+        String? assigneeId, // NEW
       }) async {
     final payload = <String, dynamic>{
       'title': title,
@@ -32,6 +33,14 @@ class TasksApi {
 
     if (deadline != null) {
       payload['deadline'] = deadline.toUtc().toIso8601String();
+    }
+
+    if (assigneeId != null && assigneeId.trim().isNotEmpty) {
+      payload['assigneeId'] = assigneeId;
+    } else {
+      //
+      // payload['assigneeId'] = null;
+      // но обычно при create лучше просто не отправлять
     }
 
     final res = await api.dio.post(

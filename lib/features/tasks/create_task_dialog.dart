@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+
+import '../members/project_member.dart';
+import '../members/project_members_api.dart';
+
 import 'task.dart';
 import 'tasks_api.dart';
 
@@ -6,10 +10,13 @@ class CreateTaskDialog extends StatefulWidget {
   final String projectId;
   final TasksApi tasksApi;
 
+  final ProjectMembersApi projectMembersApi;
+
   const CreateTaskDialog({
     super.key,
     required this.projectId,
     required this.tasksApi,
+    required this.projectMembersApi,
   });
 
   @override
@@ -25,11 +32,41 @@ class _CreateTaskDialogState extends State<CreateTaskDialog> {
 
   DateTime? _deadline;
 
+  List<ProjectMember> _members = [];
+  bool _membersLoading = true;
+
+  String? _assigneeId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMembers();
+  }
+
   @override
   void dispose() {
     _title.dispose();
     _desc.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadMembers() async {
+    setState(() => _membersLoading = true);
+    try {
+      final list = await widget.projectMembersApi.list(widget.projectId);
+      list.sort((a, b) => a.displayName.compareTo(b.displayName));
+      if (!mounted) return;
+      setState(() {
+        _members = list;
+        _membersLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _membersLoading = false;
+        _error = 'Не удалось загрузить участников: $e';
+      });
+    }
   }
 
   String _fmt(DateTime dt) {
@@ -58,6 +95,26 @@ class _CreateTaskDialogState extends State<CreateTaskDialog> {
     });
   }
 
+  List<DropdownMenuItem<String?>> _assigneeItems() {
+    final items = <DropdownMenuItem<String?>>[
+      const DropdownMenuItem<String?>(
+        value: null,
+        child: Text('Не назначен'),
+      ),
+    ];
+
+    for (final m in _members) {
+      items.add(
+        DropdownMenuItem<String?>(
+          value: m.userId,
+          child: Text(m.displayName),
+        ),
+      );
+    }
+
+    return items;
+  }
+
   Future<void> _submit() async {
     final title = _title.text.trim();
     final desc = _desc.text.trim();
@@ -78,6 +135,7 @@ class _CreateTaskDialogState extends State<CreateTaskDialog> {
         title: title,
         description: desc.isEmpty ? null : desc,
         deadline: _deadline,
+        assigneeId: _assigneeId, // если у тебя другое имя поля — см. примечание ниже
       );
 
       if (!mounted) return;
@@ -108,6 +166,14 @@ class _CreateTaskDialogState extends State<CreateTaskDialog> {
           ),
           const SizedBox(height: 12),
 
+          DropdownButtonFormField<String?>(
+            value: _assigneeId,
+            decoration: const InputDecoration(labelText: 'Исполнитель'),
+            items: _membersLoading ? null : _assigneeItems(),
+            onChanged: (_loading || _membersLoading) ? null : (v) => setState(() => _assigneeId = v),
+          ),
+
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
