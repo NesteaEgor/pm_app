@@ -187,7 +187,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 10),
 
                       Text(
-                        'Салатовый — наш акцент. Белый — база.',
+                        'Информационное пространство КП',
                         textAlign: TextAlign.center,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: cs.onSurfaceVariant,

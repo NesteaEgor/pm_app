@@ -1080,7 +1080,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
         title: const Text('Удалить сообщение?'),
         content: Text(
           _iAmOwner && m.authorId != _myUserId
-              ? 'Ты OWNER — можно удалить чужое сообщение. Удаляем?'
+              ? 'Вы OWNER — можно удалить чужое сообщение. Удалить?'
               : 'Сообщение будет помечено как удалённое.',
         ),
         actions: [

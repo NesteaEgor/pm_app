@@ -180,7 +180,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
       builder: (ctx) => AlertDialog(
         title: const Text('Удалить комментарий?'),
         content: Text(_iAmOwner && c.authorId != _myUserId
-            ? 'Ты OWNER — можно удалить чужой комментарий. Удаляем?'
+            ? 'Вы OWNER — можно удалить чужой комментарий. Удалить?'
             : 'Комментарий будет удалён.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
