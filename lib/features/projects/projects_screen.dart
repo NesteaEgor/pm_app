@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import '../../core/ui/glass.dart';
 import '../../core/storage/token_storage.dart';
 
 import '../auth/auth_api.dart';
@@ -61,7 +60,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   String? _myUserId;
 
-  // projectId -> i am owner?
   final Map<String, bool> _iAmOwnerByProjectId = {};
   final Set<String> _ownerLoading = {};
 
@@ -97,7 +95,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
 
   Future<void> _ensureOwnerLoaded(String projectId) async {
     if (_myUserId == null || _myUserId!.isEmpty) return;
-
     if (_iAmOwnerByProjectId.containsKey(projectId)) return;
     if (_ownerLoading.contains(projectId)) return;
 
@@ -114,7 +111,6 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
       });
     } catch (_) {
       if (!mounted) return;
-      // если не смогли — считаем не owner (скроем корзину)
       setState(() {
         _iAmOwnerByProjectId[projectId] = false;
       });
@@ -143,7 +139,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   void _openChat(Project p) {
-    Navigator.of(context).push(
+    Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (_) => ProjectChatScreen(
           projectId: p.id,
@@ -158,7 +154,7 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
   }
 
   void _openTasks(Project p) {
-    Navigator.of(context).push(
+    Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (_) => TasksScreen(
           projectId: p.id,
@@ -183,190 +179,192 @@ class _ProjectsScreenState extends State<ProjectsScreen> {
     );
   }
 
+  Future<void> _deleteProject(Project p) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Удалить проект?'),
+        content: Text('Проект “${p.name}” будет удалён.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          FilledButton.tonal(onPressed: () => Navigator.pop(ctx, true), child: const Text('Удалить')),
+        ],
+      ),
+    );
+
+    if (!mounted || ok != true) return;
+
+    try {
+      await widget.projectsApi.delete(p.id);
+      if (!mounted) return;
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось удалить: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
-      body: Stack(
-        children: [
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFF0F172A), Color(0xFF1E293B), Color(0xFF0B1220)],
-              ),
-            ),
+      appBar: AppBar(
+        title: const Text('Проекты'),
+        actions: [
+          IconButton(
+            tooltip: 'Профиль',
+            onPressed: _openProfile,
+            icon: const Icon(Icons.person_outline),
           ),
-          const Positioned(top: -120, left: -80, child: _Blob(size: 260)),
-          const Positioned(bottom: -140, right: -90, child: _Blob(size: 300)),
-          SafeArea(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                  child: Row(
-                    children: [
-                      const Text(
-                        'Проекты',
-                        style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        tooltip: 'Профиль',
-                        onPressed: _openProfile,
-                        icon: const Icon(Icons.person_outline),
-                      ),
-                      IconButton(
-                        tooltip: 'Выйти',
-                        onPressed: () async {
-                          await widget.authApi.logout();
-                          widget.onLoggedOut();
-                        },
-                        icon: const Icon(Icons.logout),
-                      ),
-                    ],
+          IconButton(
+            tooltip: 'Выйти',
+            onPressed: () async {
+              await widget.authApi.logout();
+              widget.onLoggedOut();
+            },
+            icon: const Icon(Icons.logout),
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: FutureBuilder<List<Project>>(
+          future: _future,
+          builder: (context, snap) {
+            if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
+              return ListView(
+                padding: const EdgeInsets.all(16),
+                children: const [
+                  SizedBox(height: 220),
+                  Center(child: CircularProgressIndicator()),
+                ],
+              );
+            }
+
+            if (snap.hasError) {
+              return ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  const SizedBox(height: 120),
+                  Icon(Icons.cloud_off_rounded, size: 44, color: cs.onSurfaceVariant),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Ошибка загрузки проектов:\n${snap.error}',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: cs.onSurfaceVariant),
                   ),
-                ),
-                Expanded(
-                  child: RefreshIndicator(
-                    onRefresh: _refresh,
-                    child: FutureBuilder<List<Project>>(
-                      future: _future,
-                      builder: (context, snap) {
-                        if (snap.connectionState == ConnectionState.waiting && !snap.hasData) {
-                          return ListView(
-                            children: const [
-                              SizedBox(height: 220),
-                              Center(child: CircularProgressIndicator()),
-                            ],
-                          );
-                        }
-
-                        if (snap.hasError) {
-                          return ListView(
-                            padding: const EdgeInsets.all(16),
-                            children: [
-                              const SizedBox(height: 120),
-                              Center(
-                                child: Text(
-                                  'Ошибка загрузки проектов:\n${snap.error}',
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              Center(
-                                child: FilledButton(
-                                  onPressed: _refresh,
-                                  child: const Text('Повторить'),
-                                ),
-                              ),
-                            ],
-                          );
-                        }
-
-                        final projects = snap.data ?? [];
-
-                        if (projects.isEmpty) {
-                          return ListView(
-                            padding: const EdgeInsets.all(16),
-                            children: const [
-                              SizedBox(height: 80),
-                              Center(
-                                child: Text(
-                                  'Пока нет проектов.\nНажми + чтобы создать.',
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ],
-                          );
-                        }
-
-                        return ListView.separated(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: projects.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 12),
-                          itemBuilder: (context, i) {
-                            final p = projects[i];
-
-                            // лениво подгружаем owner-флаг (1 раз на проект)
-                            _ensureOwnerLoaded(p.id);
-
-                            final iAmOwner = _iAmOwnerByProjectId[p.id] == true;
-
-                            return Glass(
-                              child: ListTile(
-                                title: Text(
-                                  p.name,
-                                  style: const TextStyle(fontWeight: FontWeight.w700),
-                                ),
-                                subtitle: Text(p.description ?? 'Без описания'),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      tooltip: 'Чат проекта',
-                                      icon: const Icon(Icons.chat_bubble_outline),
-                                      onPressed: () => _openChat(p),
-                                    ),
-                                    if (iAmOwner)
-                                      IconButton(
-                                        tooltip: 'Удалить проект',
-                                        icon: const Icon(Icons.delete_outline),
-                                        onPressed: () async {
-                                          try {
-                                            await widget.projectsApi.delete(p.id);
-                                            if (!mounted) return;
-                                            await _refresh();
-                                          } catch (e) {
-                                            if (!mounted) return;
-                                            ScaffoldMessenger.of(context).showSnackBar(
-                                              SnackBar(content: Text('Не удалось удалить: $e')),
-                                            );
-                                          }
-                                        },
-                                      ),
-                                  ],
-                                ),
-                                onTap: () => _openTasks(p),
-                              ),
-                            );
-                          },
-                        );
-                      },
+                  const SizedBox(height: 16),
+                  Center(
+                    child: FilledButton(
+                      onPressed: _refresh,
+                      child: const Text('Повторить'),
                     ),
                   ),
-                ),
-              ],
-            ),
-          ),
-        ],
+                ],
+              );
+            }
+
+            final projects = snap.data ?? [];
+
+            if (projects.isEmpty) {
+              return ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  const SizedBox(height: 120),
+                  Icon(Icons.folder_open_rounded, size: 44, color: cs.onSurfaceVariant),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Пока нет проектов.\nНажми + чтобы создать.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: cs.onSurfaceVariant),
+                  ),
+                ],
+              );
+            }
+
+            return ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              itemCount: projects.length,
+              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              itemBuilder: (context, i) {
+                final p = projects[i];
+                _ensureOwnerLoaded(p.id);
+
+                final iAmOwner = _iAmOwnerByProjectId[p.id] == true;
+
+                return Card(
+                  elevation: 0,
+                  color: cs.surfaceContainerLowest,
+                  surfaceTintColor: cs.surfaceTint,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(20),
+                    onTap: () => _openTasks(p),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              color: cs.primary.withOpacity(0.14),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Icon(Icons.workspaces_rounded, color: cs.primary),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  p.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontWeight: FontWeight.w800),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  (p.description ?? 'Без описания').trim().isEmpty
+                                      ? 'Без описания'
+                                      : (p.description ?? 'Без описания'),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: cs.onSurfaceVariant),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            tooltip: 'Чат',
+                            icon: const Icon(Icons.chat_bubble_outline_rounded),
+                            onPressed: () => _openChat(p),
+                          ),
+                          if (iAmOwner)
+                            IconButton(
+                              tooltip: 'Удалить',
+                              icon: const Icon(Icons.delete_outline_rounded),
+                              onPressed: () => _deleteProject(p),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _openCreateDialog,
         child: const Icon(Icons.add),
-      ),
-    );
-  }
-}
-
-class _Blob extends StatelessWidget {
-  final double size;
-  const _Blob({required this.size});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: RadialGradient(
-          colors: [
-            Colors.cyanAccent.withValues(alpha: 0.28),
-            Colors.purpleAccent.withValues(alpha: 0.14),
-            Colors.transparent,
-          ],
-        ),
       ),
     );
   }

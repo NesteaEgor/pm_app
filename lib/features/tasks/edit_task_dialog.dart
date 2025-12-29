@@ -10,7 +10,6 @@ class EditTaskDialog extends StatefulWidget {
   final String projectId;
   final Task task;
   final TasksApi tasksApi;
-
   final ProjectMembersApi projectMembersApi;
 
   const EditTaskDialog({
@@ -48,7 +47,6 @@ class _EditTaskDialogState extends State<EditTaskDialog> {
     _desc = TextEditingController(text: widget.task.description ?? '');
     _deadlineLocal = widget.task.deadline?.toLocal();
     _status = widget.task.status;
-
     _assigneeId = widget.task.assigneeId;
 
     _loadMembers();
@@ -62,7 +60,11 @@ class _EditTaskDialogState extends State<EditTaskDialog> {
   }
 
   Future<void> _loadMembers() async {
-    setState(() => _membersLoading = true);
+    setState(() {
+      _membersLoading = true;
+      _error = null;
+    });
+
     try {
       final list = await widget.projectMembersApi.list(widget.projectId);
       list.sort((a, b) => a.displayName.compareTo(b.displayName));
@@ -108,6 +110,26 @@ class _EditTaskDialogState extends State<EditTaskDialog> {
     });
   }
 
+  List<DropdownMenuItem<String?>> _assigneeItems() {
+    final items = <DropdownMenuItem<String?>>[
+      const DropdownMenuItem<String?>(
+        value: null,
+        child: Text('Не назначен'),
+      ),
+    ];
+
+    for (final m in _members) {
+      items.add(
+        DropdownMenuItem<String?>(
+          value: m.userId,
+          child: Text(m.displayName, overflow: TextOverflow.ellipsis),
+        ),
+      );
+    }
+
+    return items;
+  }
+
   Future<void> _save() async {
     final newTitle = _title.text.trim();
     final newDesc = _desc.text.trim();
@@ -140,7 +162,7 @@ class _EditTaskDialogState extends State<EditTaskDialog> {
     }
 
     if (_assigneeId != widget.task.assigneeId) {
-      patch['assigneeId'] = _assigneeId; // null = снять исполнителя
+      patch['assigneeId'] = _assigneeId;
     }
 
     if (patch.isEmpty) {
@@ -171,96 +193,102 @@ class _EditTaskDialogState extends State<EditTaskDialog> {
     }
   }
 
-  List<DropdownMenuItem<String?>> _assigneeItems() {
-    final items = <DropdownMenuItem<String?>>[
-      const DropdownMenuItem<String?>(
-        value: null,
-        child: Text('Не назначен'),
-      ),
-    ];
-
-    for (final m in _members) {
-      items.add(
-        DropdownMenuItem<String?>(
-          value: m.userId,
-          child: Text(m.displayName),
-        ),
-      );
-    }
-
-    return items;
-  }
-
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return AlertDialog(
       title: const Text('Редактировать задачу'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _title,
-            decoration: const InputDecoration(labelText: 'Название'),
-          ),
-          TextField(
-            controller: _desc,
-            decoration: const InputDecoration(labelText: 'Описание'),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<TaskStatus>(
-            value: _status,
-            decoration: const InputDecoration(labelText: 'Статус'),
-            items: TaskStatus.values
-                .map(
-                  (s) => DropdownMenuItem(
-                value: s,
-                child: Text(taskStatusToString(s)),
-              ),
-            )
-                .toList(),
-            onChanged: _loading ? null : (v) => setState(() => _status = v ?? _status),
-          ),
-          const SizedBox(height: 12),
-
-          DropdownButtonFormField<String?>(
-            value: _assigneeId,
-            decoration: const InputDecoration(labelText: 'Исполнитель'),
-            items: _membersLoading ? null : _assigneeItems(),
-            onChanged: (_loading || _membersLoading) ? null : (v) => setState(() => _assigneeId = v),
-          ),
-
-          const SizedBox(height: 12),
-          Row(
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Expanded(
-                child: Text(
-                  _deadlineLocal == null ? 'Дедлайн: не задан' : 'Дедлайн: ${_fmt(_deadlineLocal!)}',
+              TextField(
+                controller: _title,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(labelText: 'Название'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _desc,
+                keyboardType: TextInputType.multiline,
+                minLines: 3,
+                maxLines: 6,
+                decoration: const InputDecoration(labelText: 'Описание'),
+              ),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<TaskStatus>(
+                value: _status,
+                decoration: const InputDecoration(labelText: 'Статус'),
+                items: TaskStatus.values
+                    .map(
+                      (s) => DropdownMenuItem(
+                    value: s,
+                    child: Text(taskStatusToString(s)),
+                  ),
+                )
+                    .toList(),
+                onChanged: _loading ? null : (v) => setState(() => _status = v ?? _status),
+              ),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String?>(
+                value: _assigneeId,
+                decoration: const InputDecoration(labelText: 'Исполнитель'),
+                items: _membersLoading ? null : _assigneeItems(),
+                onChanged: (_loading || _membersLoading) ? null : (v) => setState(() => _assigneeId = v),
+              ),
+              const SizedBox(height: 14),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      'Дедлайн',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                    if (_deadlineLocal == null)
+                      Chip(
+                        label: Text(
+                          'не задан',
+                          style: TextStyle(color: cs.onSurfaceVariant),
+                        ),
+                        side: BorderSide(color: cs.outlineVariant),
+                        backgroundColor: cs.surfaceContainerLowest,
+                      )
+                    else
+                      InputChip(
+                        label: Text(_fmt(_deadlineLocal!)),
+                        onDeleted: _loading ? null : () => setState(() => _deadlineLocal = null),
+                      ),
+                    TextButton.icon(
+                      onPressed: _loading ? null : _pickDeadline,
+                      icon: const Icon(Icons.event_outlined),
+                      label: Text(_deadlineLocal == null ? 'Выбрать' : 'Изменить'),
+                    ),
+                  ],
                 ),
               ),
-              TextButton(
-                onPressed: _loading ? null : _pickDeadline,
-                child: const Text('Выбрать'),
-              ),
-              if (_deadlineLocal != null)
-                IconButton(
-                  tooltip: 'Убрать дедлайн',
-                  onPressed: _loading ? null : () => setState(() => _deadlineLocal = null),
-                  icon: const Icon(Icons.clear),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _error!,
+                    style: TextStyle(color: cs.error),
+                  ),
                 ),
+              ],
             ],
           ),
-
-          if (_error != null) ...[
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                _error!,
-                style: const TextStyle(color: Colors.redAccent),
-              ),
-            ),
-          ],
-        ],
+        ),
       ),
       actions: [
         TextButton(

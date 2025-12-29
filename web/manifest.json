@@ -1,6 +1,6 @@
 {
-    "name": "pm_app",
-    "short_name": "pm_app",
+    "name": "Пространство",
+    "short_name": "Пространство",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

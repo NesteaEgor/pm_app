@@ -3,7 +3,6 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../../core/storage/token_storage.dart';
-import '../../core/ui/glass.dart';
 
 import '../profile/profile_api.dart';
 import '../profile/profile_screen.dart';
@@ -17,8 +16,6 @@ class ProjectMembersScreen extends StatefulWidget {
   final String projectName;
   final ProjectMembersApi api;
   final TokenStorage tokenStorage;
-
-  // NEW:
   final ProfileApi profileApi;
 
   const ProjectMembersScreen({
@@ -87,8 +84,11 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
     final t = (_token ?? '').trim();
     if (t.isEmpty) return null;
 
-    const base = 'http://127.0.0.1:8080';
-    return '$base/api/users/$userId/avatar?token=$t';
+    const base = 'http://5.129.215.252:8081';
+    final uri = Uri.parse('$base/api/users/$userId/avatar');
+    final qp = Map<String, String>.from(uri.queryParameters);
+    qp['token'] = t;
+    return uri.replace(queryParameters: qp).toString();
   }
 
   void _openProfile(ProjectMember m) {
@@ -128,6 +128,11 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
       await widget.api.add(projectId: widget.projectId, email: e);
       _emailCtrl.clear();
       _load();
+      if (!mounted) return;
+      FocusScope.of(context).unfocus();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Пользователь добавлен')),
+      );
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -137,15 +142,177 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
   }
 
   Future<void> _remove(ProjectMember m) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Удалить участника?'),
+        content: Text('${m.displayName} будет удалён из проекта.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          FilledButton.tonal(onPressed: () => Navigator.pop(ctx, true), child: const Text('Удалить')),
+        ],
+      ),
+    );
+
+    if (!mounted || ok != true) return;
+
     try {
       await widget.api.remove(projectId: widget.projectId, userId: m.userId);
       _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Удалено')),
+      );
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Не удалось удалить: $err')),
       );
     }
+  }
+
+  Widget _inviteBar() {
+    final cs = Theme.of(context).colorScheme;
+    final canInvite = _emailCtrl.text.trim().isNotEmpty;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border: Border(bottom: BorderSide(color: cs.outlineVariant.withOpacity(0.6))),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withOpacity(0.65),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: cs.outlineVariant.withOpacity(0.45)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: TextField(
+                controller: _emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  hintText: 'Email пользователя…',
+                  border: InputBorder.none,
+                ),
+                onChanged: (_) => setState(() {}),
+                onSubmitted: _invite,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          FilledButton(
+            onPressed: canInvite ? () => _invite(_emailCtrl.text) : null,
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
+            child: const Text('Добавить'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _memberTile(ProjectMember m, {required bool iAmOwner}) {
+    final cs = Theme.of(context).colorScheme;
+    final isOwner = m.role == 'OWNER';
+    final canRemove = iAmOwner && !isOwner;
+
+    final avatarUrl = _avatarUrlWithToken(m.userId);
+    final isMe = _myUserId != null && m.userId == _myUserId;
+
+    final badgeText = isMe ? 'Вы' : (isOwner ? 'OWNER' : 'MEMBER');
+    final badgeBg = isOwner ? cs.primaryContainer : cs.surfaceContainerHighest;
+
+    return InkWell(
+      onTap: () => _openProfile(m),
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest.withOpacity(0.55),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: cs.outlineVariant.withOpacity(0.45)),
+        ),
+        child: Row(
+          children: [
+            InkWell(
+              onTap: () => _openProfile(m),
+              customBorder: const CircleBorder(),
+              child: CircleAvatar(
+                radius: 20,
+                backgroundColor: cs.surfaceContainerHighest,
+                backgroundImage: avatarUrl == null ? null : NetworkImage(avatarUrl),
+                child: avatarUrl == null
+                    ? Icon(
+                  isOwner ? Icons.verified_rounded : Icons.person_rounded,
+                  size: 20,
+                  color: cs.onSurfaceVariant,
+                )
+                    : null,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          m.displayName,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: badgeBg,
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: cs.outlineVariant.withOpacity(0.35)),
+                        ),
+                        child: Text(
+                          badgeText,
+                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: cs.onSurface,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    m.email,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (canRemove) ...[
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Удалить',
+                icon: const Icon(Icons.remove_circle_outline),
+                onPressed: () => _remove(m),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -168,26 +335,13 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
           return Column(
             children: [
               if (iAmOwner)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _emailCtrl,
-                          decoration: const InputDecoration(
-                            hintText: 'Email пользователя…',
-                            border: OutlineInputBorder(),
-                          ),
-                          onSubmitted: _invite,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      FilledButton(
-                        onPressed: () => _invite(_emailCtrl.text),
-                        child: const Text('Добавить'),
-                      ),
-                    ],
+                SafeArea(
+                  bottom: false,
+                  child: AnimatedPadding(
+                    duration: const Duration(milliseconds: 120),
+                    curve: Curves.easeOut,
+                    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+                    child: _inviteBar(),
                   ),
                 ),
               Expanded(
@@ -195,40 +349,7 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
                   padding: const EdgeInsets.all(12),
                   itemCount: members.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (context, i) {
-                    final m = members[i];
-                    final isOwner = m.role == 'OWNER';
-                    final canRemove = iAmOwner && !isOwner;
-
-                    final avatarUrl = _avatarUrlWithToken(m.userId);
-
-                    return Glass(
-                      child: ListTile(
-                        leading: InkWell(
-                          onTap: () => _openProfile(m),
-                          child: CircleAvatar(
-                            radius: 18,
-                            backgroundColor: Colors.white.withValues(alpha: 0.08),
-                            backgroundImage: avatarUrl == null ? null : NetworkImage(avatarUrl),
-                            child: avatarUrl == null
-                                ? Icon(isOwner ? Icons.verified : Icons.person_outline, size: 18)
-                                : null,
-                          ),
-                        ),
-                        title: Text(m.displayName),
-                        subtitle: Text('${m.email}\n${m.role}'),
-                        isThreeLine: true,
-                        onTap: () => _openProfile(m),
-                        trailing: canRemove
-                            ? IconButton(
-                          tooltip: 'Удалить',
-                          icon: const Icon(Icons.remove_circle_outline),
-                          onPressed: () => _remove(m),
-                        )
-                            : null,
-                      ),
-                    );
-                  },
+                  itemBuilder: (context, i) => _memberTile(members[i], iAmOwner: iAmOwner),
                 ),
               ),
             ],

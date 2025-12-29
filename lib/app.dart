@@ -6,6 +6,7 @@ import 'core/storage/token_storage.dart';
 import 'features/auth/auth_api.dart';
 import 'features/auth/login_screen.dart';
 
+import 'features/home/home_shell.dart';
 import 'features/projects/projects_api.dart';
 import 'features/projects/projects_screen.dart';
 
@@ -58,8 +59,6 @@ class _AppState extends State<App> {
     commentsApi = CommentsApi(api: apiClient);
     chatApi = ChatApi(api: apiClient);
     projectMembersApi = ProjectMembersApi(api: apiClient);
-
-    // FIX: ProfileApi принимает только ApiClient
     profileApi = ProfileApi(api: apiClient);
   }
 
@@ -68,20 +67,108 @@ class _AppState extends State<App> {
     return t != null && t.isNotEmpty;
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.dark,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: Colors.cyan,
-        brightness: Brightness.dark,
-      ),
+  ThemeData _buildTheme() {
+    const seed = Color(0xFF7CFF6B);
+
+    final scheme = ColorScheme.fromSeed(
+      seedColor: seed,
+      brightness: Brightness.light,
+    ).copyWith(
+      surface: Colors.white,
+      background: Colors.white,
     );
 
+    return ThemeData(
+      useMaterial3: true,
+      colorScheme: scheme,
+      scaffoldBackgroundColor: scheme.surface,
+
+      appBarTheme: AppBarTheme(
+        backgroundColor: scheme.surface,
+        foregroundColor: scheme.onSurface,
+        elevation: 0,
+        centerTitle: false,
+        surfaceTintColor: scheme.surfaceTint,
+      ),
+
+      cardTheme: CardThemeData(
+        elevation: 0,
+        color: scheme.surface,
+        surfaceTintColor: scheme.surfaceTint,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+      ),
+
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ),
+
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: const Color(0xA3F0FFE9),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: scheme.primary, width: 1.4),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      ),
+
+      dialogTheme: DialogThemeData(
+        backgroundColor: scheme.surface,
+        surfaceTintColor: scheme.surfaceTint,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+        ),
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: scheme.surface,
+        surfaceTintColor: scheme.surfaceTint,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+      ),
+
+      progressIndicatorTheme: ProgressIndicatorThemeData(
+        color: scheme.primary,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: theme,
+      theme: _buildTheme(),
       home: FutureBuilder<bool>(
         future: _hasToken(),
         builder: (context, snap) {
@@ -99,7 +186,7 @@ class _AppState extends State<App> {
             );
           }
 
-          return ProjectsScreen(
+          return HomeShell(
             projectsApi: projectsApi,
             tasksApi: tasksApi,
             commentsApi: commentsApi,
@@ -110,6 +197,7 @@ class _AppState extends State<App> {
             onLoggedOut: () => setState(() {}),
             profileApi: profileApi,
           );
+
         },
       ),
     );

@@ -9,7 +9,6 @@ import 'tasks_api.dart';
 class CreateTaskDialog extends StatefulWidget {
   final String projectId;
   final TasksApi tasksApi;
-
   final ProjectMembersApi projectMembersApi;
 
   const CreateTaskDialog({
@@ -51,7 +50,10 @@ class _CreateTaskDialogState extends State<CreateTaskDialog> {
   }
 
   Future<void> _loadMembers() async {
-    setState(() => _membersLoading = true);
+    setState(() {
+      _membersLoading = true;
+      _error = null;
+    });
     try {
       final list = await widget.projectMembersApi.list(widget.projectId);
       list.sort((a, b) => a.displayName.compareTo(b.displayName));
@@ -107,7 +109,7 @@ class _CreateTaskDialogState extends State<CreateTaskDialog> {
       items.add(
         DropdownMenuItem<String?>(
           value: m.userId,
-          child: Text(m.displayName),
+          child: Text(m.displayName, overflow: TextOverflow.ellipsis),
         ),
       );
     }
@@ -135,7 +137,7 @@ class _CreateTaskDialogState extends State<CreateTaskDialog> {
         title: title,
         description: desc.isEmpty ? null : desc,
         deadline: _deadline,
-        assigneeId: _assigneeId, // если у тебя другое имя поля — см. примечание ниже
+        assigneeId: _assigneeId,
       );
 
       if (!mounted) return;
@@ -151,60 +153,90 @@ class _CreateTaskDialogState extends State<CreateTaskDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return AlertDialog(
       title: const Text('Новая задача'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _title,
-            decoration: const InputDecoration(labelText: 'Название'),
-          ),
-          TextField(
-            controller: _desc,
-            decoration: const InputDecoration(labelText: 'Описание'),
-          ),
-          const SizedBox(height: 12),
-
-          DropdownButtonFormField<String?>(
-            value: _assigneeId,
-            decoration: const InputDecoration(labelText: 'Исполнитель'),
-            items: _membersLoading ? null : _assigneeItems(),
-            onChanged: (_loading || _membersLoading) ? null : (v) => setState(() => _assigneeId = v),
-          ),
-
-          const SizedBox(height: 12),
-          Row(
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Expanded(
-                child: Text(
-                  _deadline == null ? 'Дедлайн: не задан' : 'Дедлайн: ${_fmt(_deadline!)}',
+              TextField(
+                controller: _title,
+                textInputAction: TextInputAction.next,
+                decoration: const InputDecoration(
+                  labelText: 'Название',
                 ),
               ),
-              TextButton(
-                onPressed: _loading ? null : _pickDeadline,
-                child: const Text('Выбрать'),
-              ),
-              if (_deadline != null)
-                IconButton(
-                  tooltip: 'Убрать дедлайн',
-                  onPressed: _loading ? null : () => setState(() => _deadline = null),
-                  icon: const Icon(Icons.clear),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _desc,
+                keyboardType: TextInputType.multiline,
+                minLines: 3,
+                maxLines: 6,
+                decoration: const InputDecoration(
+                  labelText: 'Описание',
                 ),
+              ),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String?>(
+                value: _assigneeId,
+                decoration: const InputDecoration(labelText: 'Исполнитель'),
+                items: _membersLoading ? null : _assigneeItems(),
+                onChanged: (_loading || _membersLoading) ? null : (v) => setState(() => _assigneeId = v),
+              ),
+              const SizedBox(height: 14),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      'Дедлайн',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                    if (_deadline == null)
+                      Chip(
+                        label: Text(
+                          'не задан',
+                          style: TextStyle(color: cs.onSurfaceVariant),
+                        ),
+                        side: BorderSide(color: cs.outlineVariant),
+                        backgroundColor: cs.surfaceContainerLowest,
+                      )
+                    else
+                      InputChip(
+                        label: Text(_fmt(_deadline!)),
+                        onDeleted: _loading ? null : () => setState(() => _deadline = null),
+                      ),
+                    TextButton.icon(
+                      onPressed: _loading ? null : _pickDeadline,
+                      icon: const Icon(Icons.event_outlined),
+                      label: Text(_deadline == null ? 'Выбрать' : 'Изменить'),
+                    ),
+                  ],
+                ),
+              ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    _error!,
+                    style: TextStyle(color: cs.error),
+                  ),
+                ),
+              ],
             ],
           ),
-
-          if (_error != null) ...[
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                _error!,
-                style: const TextStyle(color: Colors.redAccent),
-              ),
-            ),
-          ],
-        ],
+        ),
       ),
       actions: [
         TextButton(

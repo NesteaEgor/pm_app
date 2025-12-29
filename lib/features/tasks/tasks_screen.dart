@@ -219,7 +219,7 @@ class _TasksScreenState extends State<TasksScreen> {
   }
 
   void _openComments(Task t) {
-    Navigator.of(context).push(
+    Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (_) => CommentsScreen(
           projectId: widget.projectId,
@@ -245,11 +245,12 @@ class _TasksScreenState extends State<TasksScreen> {
   }
 
   String _fmtDeadline(DateTime d) {
-    final y = d.year.toString().padLeft(4, '0');
-    final m = d.month.toString().padLeft(2, '0');
-    final day = d.day.toString().padLeft(2, '0');
-    final hh = d.hour.toString().padLeft(2, '0');
-    final mm = d.minute.toString().padLeft(2, '0');
+    final local = d.toLocal();
+    final y = local.year.toString().padLeft(4, '0');
+    final m = local.month.toString().padLeft(2, '0');
+    final day = local.day.toString().padLeft(2, '0');
+    final hh = local.hour.toString().padLeft(2, '0');
+    final mm = local.minute.toString().padLeft(2, '0');
     return '$y-$m-$day $hh:$mm';
   }
 
@@ -272,18 +273,6 @@ class _TasksScreenState extends State<TasksScreen> {
       ),
     );
     return ok == true;
-  }
-
-  Widget _statusPill(TaskStatus s) {
-    final text = taskStatusToString(s);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: Colors.white.withValues(alpha: 0.08),
-      ),
-      child: Text(text, style: const TextStyle(fontSize: 12)),
-    );
   }
 
   String _filterLabel() {
@@ -312,8 +301,53 @@ class _TasksScreenState extends State<TasksScreen> {
     }
   }
 
+  String _statusShort(TaskStatus s) {
+    switch (s) {
+      case TaskStatus.TODO:
+        return 'TODO';
+      case TaskStatus.IN_PROGRESS:
+        return 'IN_PROGRESS';
+      case TaskStatus.DONE:
+        return 'DONE';
+    }
+  }
+
+  Widget _statusChip(TaskStatus s) {
+    return Chip(
+      label: Text(_statusShort(s)),
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  Widget _metaChip(String text, {IconData? icon}) {
+    return Chip(
+      visualDensity: VisualDensity.compact,
+      avatar: icon == null ? null : Icon(icon, size: 16),
+      label: Text(text),
+    );
+  }
+
+  Future<void> _changeStatus(Task t) async {
+    try {
+      final next = _nextStatus(t.status);
+      await widget.tasksApi.patch(
+        widget.projectId,
+        t.id,
+        {'status': taskStatusToString(next)},
+      );
+      if (!mounted) return;
+      await _load(showSpinner: false);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final sub = '${_filterLabel()} • ${_sortLabel()}';
 
     return Scaffold(
@@ -327,7 +361,7 @@ class _TasksScreenState extends State<TasksScreen> {
               sub,
               style: TextStyle(
                 fontSize: 12,
-                color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                color: cs.onSurfaceVariant,
                 fontWeight: FontWeight.w400,
               ),
             ),
@@ -336,7 +370,7 @@ class _TasksScreenState extends State<TasksScreen> {
         actions: [
           PopupMenuButton<TaskFilter>(
             tooltip: 'Фильтр',
-            icon: const Icon(Icons.filter_list),
+            icon: const Icon(Icons.filter_list_rounded),
             onSelected: (f) => setState(() {
               _filter = f;
               _load(showSpinner: false);
@@ -378,7 +412,7 @@ class _TasksScreenState extends State<TasksScreen> {
           ),
           PopupMenuButton<TaskSortMode>(
             tooltip: 'Сортировка',
-            icon: const Icon(Icons.sort),
+            icon: const Icon(Icons.sort_rounded),
             onSelected: (m) => setState(() {
               _sortMode = m;
               _load(showSpinner: false);
@@ -440,9 +474,9 @@ class _TasksScreenState extends State<TasksScreen> {
           ],
         )
             : ListView.separated(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
           itemCount: _tasks.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          separatorBuilder: (_, __) => const SizedBox(height: 10),
           itemBuilder: (context, i) {
             final t = _tasks[i];
 
@@ -453,80 +487,129 @@ class _TasksScreenState extends State<TasksScreen> {
             final canAll = _iAmOwner || isReporter;
             final canEdit = canAll;
             final canDelete = canAll;
-
             final canChangeStatus = _iAmOwner || isReporter || isAssignee;
 
-            final lines = <String>[];
             final desc = (t.description ?? '').trim();
-            if (desc.isNotEmpty) lines.add(desc);
-
             final rep = (t.reporterName ?? '').trim();
-            if (rep.isNotEmpty) lines.add('Постановщик: $rep');
-
             final ass = (t.assigneeName ?? '').trim();
-            if (ass.isNotEmpty) lines.add('Исполнитель: $ass');
 
-            if (t.deadline != null) {
-              lines.add('Дедлайн: ${_fmtDeadline(t.deadline!.toLocal())}');
-            }
+            final chips = <Widget>[
+              _statusChip(t.status),
+              if (t.deadline != null) _metaChip(_fmtDeadline(t.deadline!), icon: Icons.schedule_rounded),
+              if (rep.isNotEmpty) _metaChip(rep, icon: Icons.person_outline_rounded),
+              if (ass.isNotEmpty) _metaChip(ass, icon: Icons.assignment_ind_outlined),
+            ];
 
-            return ListTile(
-              title: Text(t.title),
-              subtitle: lines.isEmpty ? null : Text(lines.join('\n')),
-              leading: _statusPill(t.status),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: 'Комментарии',
-                    icon: const Icon(Icons.chat_bubble_outline),
-                    onPressed: () => _openComments(t),
+            return Card(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: canEdit ? () => _openEditDialog(t) : null,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              t.title,
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          PopupMenuButton<String>(
+                            tooltip: 'Действия',
+                            onSelected: (v) async {
+                              if (v == 'comments') {
+                                _openComments(t);
+                                return;
+                              }
+                              if (v == 'status') {
+                                await _changeStatus(t);
+                                return;
+                              }
+                              if (v == 'delete') {
+                                final ok = await _confirmDelete(t);
+                                if (!ok) return;
+                                try {
+                                  await widget.tasksApi.delete(widget.projectId, t.id);
+                                  if (!mounted) return;
+                                  await _load(showSpinner: false);
+                                } catch (e) {
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Ошибка: $e')),
+                                  );
+                                }
+                                return;
+                              }
+                              if (v == 'edit') {
+                                await _openEditDialog(t);
+                                return;
+                              }
+                            },
+                            itemBuilder: (_) => [
+                              const PopupMenuItem(
+                                value: 'comments',
+                                child: ListTile(
+                                  leading: Icon(Icons.chat_bubble_outline_rounded),
+                                  title: Text('Комментарии'),
+                                ),
+                              ),
+                              if (canEdit)
+                                const PopupMenuItem(
+                                  value: 'edit',
+                                  child: ListTile(
+                                    leading: Icon(Icons.edit_outlined),
+                                    title: Text('Редактировать'),
+                                  ),
+                                ),
+                              if (canChangeStatus)
+                                const PopupMenuItem(
+                                  value: 'status',
+                                  child: ListTile(
+                                    leading: Icon(Icons.autorenew_rounded),
+                                    title: Text('Сменить статус'),
+                                  ),
+                                ),
+                              if (canDelete) ...[
+                                const PopupMenuDivider(),
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: ListTile(
+                                    leading: Icon(Icons.delete_outline_rounded, color: cs.error),
+                                    title: Text('Удалить', style: TextStyle(color: cs.error)),
+                                  ),
+                                ),
+                              ],
+                            ],
+                            child: const Padding(
+                              padding: EdgeInsets.all(6),
+                              child: Icon(Icons.more_vert_rounded),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (desc.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          desc,
+                          style: TextStyle(color: cs.onSurfaceVariant),
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: chips,
+                      ),
+                    ],
                   ),
-                  if (canChangeStatus)
-                    IconButton(
-                      tooltip: 'Сменить статус',
-                      icon: const Icon(Icons.autorenew),
-                      onPressed: () async {
-                        try {
-                          final next = _nextStatus(t.status);
-                          await widget.tasksApi.patch(
-                            widget.projectId,
-                            t.id,
-                            {'status': taskStatusToString(next)},
-                          );
-                          if (!mounted) return;
-                          await _load(showSpinner: false);
-                        } catch (e) {
-                          if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Ошибка: $e')),
-                          );
-                        }
-                      },
-                    ),
-                  if (canDelete)
-                    IconButton(
-                      tooltip: 'Удалить',
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () async {
-                        final ok = await _confirmDelete(t);
-                        if (!ok) return;
-
-                        try {
-                          await widget.tasksApi.delete(widget.projectId, t.id);
-                          if (!mounted) return;
-                          await _load(showSpinner: false);
-                        } catch (e) {
-                          if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Ошибка: $e')),
-                          );
-                        }
-                      },
-                    ),
-                ],
+                ),
               ),
-              onTap: canEdit ? () => _openEditDialog(t) : null,
             );
           },
         ),

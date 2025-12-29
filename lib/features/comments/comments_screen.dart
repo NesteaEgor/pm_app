@@ -13,7 +13,6 @@ class CommentsScreen extends StatefulWidget {
   final String taskTitle;
   final CommentsApi commentsApi;
 
-  // теперь ВСЕГДА передаём — чтобы работало "по-настоящему"
   final TokenStorage tokenStorage;
   final ProjectMembersApi projectMembersApi;
 
@@ -73,9 +72,7 @@ class _CommentsScreenState extends State<CommentsScreen> {
       final owner = me.isNotEmpty && me.first.role == 'OWNER';
 
       if (mounted) setState(() => _iAmOwner = owner);
-    } catch (_) {
-      // если не удалось — просто считаем что не OWNER
-    }
+    } catch (_) {}
   }
 
   String? _tryReadSubFromJwt(String? token) {
@@ -178,6 +175,22 @@ class _CommentsScreenState extends State<CommentsScreen> {
       return;
     }
 
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Удалить комментарий?'),
+        content: Text(_iAmOwner && c.authorId != _myUserId
+            ? 'Ты OWNER — можно удалить чужой комментарий. Удаляем?'
+            : 'Комментарий будет удалён.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          FilledButton.tonal(onPressed: () => Navigator.pop(ctx, true), child: const Text('Удалить')),
+        ],
+      ),
+    );
+
+    if (!mounted || ok != true) return;
+
     try {
       await widget.commentsApi.delete(
         projectId: widget.projectId,
@@ -197,8 +210,147 @@ class _CommentsScreenState extends State<CommentsScreen> {
     }
   }
 
+  Widget _buildComposer() {
+    final cs = Theme.of(context).colorScheme;
+    final hasText = _ctrl.text.trim().isNotEmpty;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border: Border(top: BorderSide(color: cs.outlineVariant.withOpacity(0.6))),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerHighest.withOpacity(0.65),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: cs.outlineVariant.withOpacity(0.45)),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              child: TextField(
+                controller: _ctrl,
+                minLines: 1,
+                maxLines: 5,
+                decoration: const InputDecoration(
+                  hintText: 'Комментарий…',
+                  border: InputBorder.none,
+                ),
+                onChanged: (_) => setState(() {}),
+                onSubmitted: (_) => _sending ? null : _send(),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          FilledButton(
+            onPressed: (_sending || !hasText) ? null : _send,
+            style: FilledButton.styleFrom(
+              shape: const CircleBorder(),
+              padding: const EdgeInsets.all(14),
+            ),
+            child: _sending
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.send_rounded),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCommentTile(Comment c) {
+    final cs = Theme.of(context).colorScheme;
+    final canDel = _canDelete(c);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withOpacity(0.55),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cs.outlineVariant.withOpacity(0.45)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  c.text,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(height: 1.25),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _fmt(c.createdAt),
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          IconButton(
+            tooltip: canDel ? 'Удалить' : 'Удалить можно только свой',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: canDel ? () => _delete(c) : null,
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final body = RefreshIndicator(
+      onRefresh: _refresh,
+      child: Builder(
+        builder: (_) {
+          if (_loading) return const Center(child: CircularProgressIndicator());
+
+          if (_error != null) {
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                const SizedBox(height: 80),
+                Text('Ошибка:\n$_error', textAlign: TextAlign.center),
+                const SizedBox(height: 12),
+                Center(
+                  child: FilledButton(
+                    onPressed: _load,
+                    child: const Text('Повторить'),
+                  ),
+                ),
+              ],
+            );
+          }
+
+          if (_items.isEmpty) {
+            return ListView(
+              padding: const EdgeInsets.all(16),
+              children: const [
+                SizedBox(height: 80),
+                Center(
+                  child: Text(
+                    'Пока нет комментариев.\nНапиши первый 🙂',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            );
+          }
+
+          return ListView.separated(
+            controller: _scroll,
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+            itemCount: _items.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 10),
+            itemBuilder: (context, i) => _buildCommentTile(_items[i]),
+          );
+        },
+      ),
+    );
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Комментарии: ${widget.taskTitle}${_iAmOwner ? ' • OWNER' : ''}'),
@@ -212,95 +364,14 @@ class _CommentsScreenState extends State<CommentsScreen> {
       ),
       body: Column(
         children: [
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _refresh,
-              child: Builder(
-                builder: (_) {
-                  if (_loading) return const Center(child: CircularProgressIndicator());
-
-                  if (_error != null) {
-                    return ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: [
-                        const SizedBox(height: 80),
-                        Text('Ошибка:\n$_error', textAlign: TextAlign.center),
-                        const SizedBox(height: 12),
-                        Center(
-                          child: FilledButton(
-                            onPressed: _load,
-                            child: const Text('Повторить'),
-                          ),
-                        ),
-                      ],
-                    );
-                  }
-
-                  if (_items.isEmpty) {
-                    return ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: const [
-                        SizedBox(height: 80),
-                        Center(
-                          child: Text(
-                            'Пока нет комментариев.\nНапиши первый 🙂',
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      ],
-                    );
-                  }
-
-                  return ListView.separated(
-                    controller: _scroll,
-                    padding: const EdgeInsets.all(12),
-                    itemCount: _items.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemBuilder: (context, i) {
-                      final c = _items[i];
-                      final canDel = _canDelete(c);
-
-                      return ListTile(
-                        title: Text(c.text),
-                        subtitle: Text(_fmt(c.createdAt)),
-                        trailing: IconButton(
-                          tooltip: canDel ? 'Удалить' : 'Удалить можно только свой',
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: canDel ? () => _delete(c) : null,
-                        ),
-                      );
-                    },
-                  );
-                },
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _ctrl,
-                    decoration: const InputDecoration(
-                      hintText: 'Комментарий...',
-                      border: OutlineInputBorder(),
-                    ),
-                    onSubmitted: (_) => _sending ? null : _send(),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: _sending ? null : _send,
-                  child: _sending
-                      ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                      : const Text('Отправить'),
-                )
-              ],
+          Expanded(child: body),
+          SafeArea(
+            bottom: true,
+            child: AnimatedPadding(
+              duration: const Duration(milliseconds: 120),
+              curve: Curves.easeOut,
+              padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+              child: _buildComposer(),
             ),
           ),
         ],
