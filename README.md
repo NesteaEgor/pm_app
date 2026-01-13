@@ -1,16 +1,32 @@
-# pm_app
 
-Product management
+---
 
-## Getting Started
+## README.md для **pm_app**
 
-This project is a starting point for a Flutter application.
+```md
+# PM App
 
-A few resources to get you started if this is your first Flutter project:
+Мобильное приложение для управления проектами и задачами.
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+Клиентская часть реализована на Flutter и взаимодействует с backend-сервером через REST API и WebSocket.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Технологии
+
+- Flutter
+- Dart
+- Dio (HTTP клиент)
+- WebSocket / STOMP
+- flutter_secure_storage
+- path_provider
+- open_filex
+
+## Основной функционал
+
+- Регистрация и авторизация пользователей
+- Просмотр и создание проектов
+- Управление участниками проекта
+- Работа с задачами (создание, редактирование, статусы, дедлайны)
+- Комментарии к задачам
+- Чат проекта в реальном времени
+- Скачивание PDF-отчетов по задачам
+
