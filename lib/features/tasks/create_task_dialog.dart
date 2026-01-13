@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../core/api/api_error_mapper.dart';
+
 import '../members/project_member.dart';
 import '../members/project_members_api.dart';
 
@@ -66,7 +68,7 @@ class _CreateTaskDialogState extends State<CreateTaskDialog> {
       if (!mounted) return;
       setState(() {
         _membersLoading = false;
-        _error = 'Не удалось загрузить участников: $e';
+        _error = 'Не удалось загрузить участников: ${userMessageFromError(e)}';
       });
     }
   }
@@ -146,7 +148,7 @@ class _CreateTaskDialogState extends State<CreateTaskDialog> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Ошибка: $e';
+        _error = userMessageFromError(e);
       });
     }
   }

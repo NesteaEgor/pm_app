@@ -1,6 +1,7 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/api/api_error_mapper.dart';
 import '../../core/storage/token_storage.dart';
 import 'profile_api.dart';
 
@@ -60,8 +61,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
+      final msg = userMessageFromError(e);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не загрузилось: $e')),
+        SnackBar(content: Text(msg)),
       );
     }
   }
@@ -86,11 +88,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _save() async {
     if (_saving) return;
+
+    final name = _name.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Имя не может быть пустым')),
+      );
+      return;
+    }
+    if (name.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Имя должно быть минимум 2 символа')),
+      );
+      return;
+    }
+
     setState(() => _saving = true);
 
     try {
       final updated = await widget.profileApi.updateMe(
-        displayName: _name.text.trim(),
+        displayName: name,
         status: _status.text.trim(),
       );
       if (!mounted) return;
@@ -101,8 +118,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       FocusScope.of(context).unfocus();
     } catch (e) {
       if (!mounted) return;
+      final msg = userMessageFromError(e);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не сохранилось: $e')),
+        SnackBar(content: Text(msg)),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -137,8 +155,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       );
     } catch (e) {
       if (!mounted) return;
+      final msg = userMessageFromError(e);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не загрузилось: $e')),
+        SnackBar(content: Text(msg)),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -157,7 +176,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
       decoration: BoxDecoration(
         color: cs.surface,
-        border: Border(bottom: BorderSide(color: cs.outlineVariant.withOpacity(0.6))),
+        border: Border(
+          bottom: BorderSide(color: cs.outlineVariant.withOpacity(0.6)),
+        ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,

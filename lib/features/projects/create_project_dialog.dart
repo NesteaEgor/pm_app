@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/api/api_error_mapper.dart';
 import 'project.dart';
 import 'projects_api.dart';
 
@@ -34,6 +35,13 @@ class _CreateProjectDialogState extends State<CreateProjectDialog> {
       return;
     }
 
+    if (name.length < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Название должно быть минимум 3 символа')),
+      );
+      return;
+    }
+
     setState(() => _loading = true);
     try {
       final created = await widget.projectsApi.create(
@@ -45,8 +53,9 @@ class _CreateProjectDialogState extends State<CreateProjectDialog> {
       Navigator.of(context).pop<Project>(created);
     } catch (e) {
       if (!mounted) return;
+      final msg = userMessageFromError(e);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось создать проект: $e')),
+        SnackBar(content: Text(msg)),
       );
       setState(() => _loading = false);
     }

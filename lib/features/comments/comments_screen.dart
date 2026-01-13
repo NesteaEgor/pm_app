@@ -234,12 +234,24 @@ class _CommentsScreenState extends State<CommentsScreen> {
                 controller: _ctrl,
                 minLines: 1,
                 maxLines: 5,
+                textAlignVertical: TextAlignVertical.center,
                 decoration: const InputDecoration(
                   hintText: 'Комментарий…',
                   border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  disabledBorder: InputBorder.none,
+                  errorBorder: InputBorder.none,
+                  focusedErrorBorder: InputBorder.none,
+                  filled: false,
+                  fillColor: Colors.transparent,
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 14),
                 ),
                 onChanged: (_) => setState(() {}),
-                onSubmitted: (_) => _sending ? null : _send(),
+                onSubmitted: (_) {
+                  if (!_sending) _send();
+                },
               ),
             ),
           ),
@@ -366,13 +378,9 @@ class _CommentsScreenState extends State<CommentsScreen> {
         children: [
           Expanded(child: body),
           SafeArea(
+            top: false,
             bottom: true,
-            child: AnimatedPadding(
-              duration: const Duration(milliseconds: 120),
-              curve: Curves.easeOut,
-              padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-              child: _buildComposer(),
-            ),
+            child: _buildComposer(),
           ),
         ],
       ),

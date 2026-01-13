@@ -13,6 +13,10 @@ import 'tasks_api.dart';
 import '../comments/comments_api.dart';
 import '../comments/comments_screen.dart';
 
+import 'package:dio/dio.dart';
+import 'task_report_api.dart';
+import 'task_report_file.dart';
+
 enum TaskFilter { all, todo, inProgress, done, myReported, myAssigned }
 enum TaskSortMode { deadlineAsc, createdAtDesc }
 
@@ -368,6 +372,11 @@ class _TasksScreenState extends State<TasksScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Отчёт PDF',
+            icon: const Icon(Icons.picture_as_pdf_rounded),
+            onPressed: _openReportDialog,
+          ),
           PopupMenuButton<TaskFilter>(
             tooltip: 'Фильтр',
             icon: const Icon(Icons.filter_list_rounded),
@@ -616,4 +625,85 @@ class _TasksScreenState extends State<TasksScreen> {
       ),
     );
   }
+  TaskReportApi _reportApi() => TaskReportApi(widget.tasksApi.api.dio);
+
+  Future<void> _openReportDialog() async {
+    String? role;   // null | creator | assignee
+    String? status; // null | TODO | IN_PROGRESS | DONE
+    bool loading = false;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSB) => AlertDialog(
+          title: const Text('Отчёт по задачам'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String?>(
+                value: role,
+                decoration: const InputDecoration(labelText: 'Роль'),
+                items: const [
+                  DropdownMenuItem(value: null, child: Text('Все')),
+                  DropdownMenuItem(value: 'creator', child: Text('Я постановщик')),
+                  DropdownMenuItem(value: 'assignee', child: Text('Я исполнитель')),
+                ],
+                onChanged: loading ? null : (v) => role = v,
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String?>(
+                value: status,
+                decoration: const InputDecoration(labelText: 'Статус'),
+                items: const [
+                  DropdownMenuItem(value: null, child: Text('Все')),
+                  DropdownMenuItem(value: 'TODO', child: Text('TODO')),
+                  DropdownMenuItem(value: 'IN_PROGRESS', child: Text('IN_PROGRESS')),
+                  DropdownMenuItem(value: 'DONE', child: Text('DONE')),
+                ],
+                onChanged: loading ? null : (v) => status = v,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: loading ? null : () => Navigator.pop(ctx),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: loading
+                  ? null
+                  : () async {
+                setSB(() => loading = true);
+                try {
+                  final bytes = await _reportApi().downloadReport(
+                    projectId: widget.projectId,
+                    role: role,
+                    status: status,
+                  );
+
+                  await saveAndOpenPdf(
+                    bytes,
+                    fileName: 'task-report-${widget.projectName}',
+                  );
+
+                  if (ctx.mounted) Navigator.pop(ctx);
+                } catch (e) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Не удалось скачать отчёт: $e')),
+                  );
+                } finally {
+                  setSB(() => loading = false);
+                }
+              },
+              child: loading
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('Скачать PDF'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
 }

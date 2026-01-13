@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../core/api/api_error_mapper.dart';
 import '../../core/storage/token_storage.dart';
 
 import '../profile/profile_api.dart';
@@ -135,11 +136,13 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
       );
     } catch (err) {
       if (!mounted) return;
+      final msg = userMessageFromError(err);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось добавить: $err')),
+        SnackBar(content: Text(msg)),
       );
     }
   }
+
 
   Future<void> _remove(ProjectMember m) async {
     final ok = await showDialog<bool>(
@@ -175,6 +178,11 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
     final cs = Theme.of(context).colorScheme;
     final canInvite = _emailCtrl.text.trim().isNotEmpty;
 
+    final border = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(999),
+      borderSide: BorderSide(color: cs.outlineVariant.withOpacity(0.45)),
+    );
+
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       decoration: BoxDecoration(
@@ -184,19 +192,29 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
       child: Row(
         children: [
           Expanded(
-            child: Container(
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest.withOpacity(0.65),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: cs.outlineVariant.withOpacity(0.45)),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: SizedBox(
+              height: 52,
               child: TextField(
                 controller: _emailCtrl,
                 keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
+                textAlignVertical: TextAlignVertical.center,
+                decoration: InputDecoration(
                   hintText: 'Email пользователя…',
-                  border: InputBorder.none,
+                  filled: true,
+                  fillColor: cs.surfaceContainerHighest.withOpacity(0.65),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(999),
+                    borderSide: BorderSide(color: cs.outlineVariant.withOpacity(0.45)),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(999),
+                    borderSide: BorderSide(color: cs.outlineVariant.withOpacity(0.45)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(999),
+                    borderSide: BorderSide(color: cs.outlineVariant.withOpacity(0.45)),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                 ),
                 onChanged: (_) => setState(() {}),
                 onSubmitted: _invite,
@@ -204,18 +222,23 @@ class _ProjectMembersScreenState extends State<ProjectMembersScreen> {
             ),
           ),
           const SizedBox(width: 10),
-          FilledButton(
-            onPressed: canInvite ? () => _invite(_emailCtrl.text) : null,
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          SizedBox(
+            height: 52,
+            child: FilledButton(
+              onPressed: canInvite ? () => _invite(_emailCtrl.text) : null,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+              ),
+              child: const Text('Добавить'),
             ),
-            child: const Text('Добавить'),
           ),
         ],
       ),
     );
   }
+
+
 
   Widget _memberTile(ProjectMember m, {required bool iAmOwner}) {
     final cs = Theme.of(context).colorScheme;

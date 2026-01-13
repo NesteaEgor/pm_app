@@ -17,6 +17,8 @@ dependencies:
   stomp_dart_client: ^2.1.0
   file_picker: ^10.3.8
   url_launcher: ^6.3.2
+  path_provider: ^2.1.2
+  open_filex: ^4.4.0
 
 dev_dependencies:
   flutter_test:

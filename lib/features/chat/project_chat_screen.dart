@@ -951,57 +951,70 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
         }
 
         return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  _buildUserAvatar(m.authorId, radius: 18),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      m.authorName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(ctx).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewPadding.bottom,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    _buildUserAvatar(m.authorId, radius: 18),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        m.authorName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
                     ),
+                    Text(
+                      _fmtTime(m.createdAt),
+                      style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: emojis.map(reactionChip).toList(),
                   ),
-                  Text(
-                    _fmtTime(m.createdAt),
-                    style: Theme.of(ctx).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                ),
+                const SizedBox(height: 14),
+                const Divider(height: 1),
+                if (canEdit)
+                  ListTile(
+                    leading: const Icon(Icons.edit_outlined),
+                    title: const Text('Редактировать'),
+                    onTap: () => Navigator.pop(ctx, 'edit'),
                   ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: emojis.map(reactionChip).toList(),
-                ),
-              ),
-              const SizedBox(height: 14),
-              const Divider(height: 1),
-              if (canEdit)
+                if (canDelete)
+                  ListTile(
+                    leading: const Icon(Icons.delete_outline),
+                    title: Text(
+                      _iAmOwner && m.authorId != _myUserId
+                          ? 'Удалить (как OWNER)'
+                          : 'Удалить',
+                    ),
+                    onTap: () => Navigator.pop(ctx, 'delete'),
+                  ),
                 ListTile(
-                  leading: const Icon(Icons.edit_outlined),
-                  title: const Text('Редактировать'),
-                  onTap: () => Navigator.pop(ctx, 'edit'),
+                  leading: const Icon(Icons.close),
+                  title: const Text('Закрыть'),
+                  onTap: () => Navigator.pop(ctx, 'close'),
                 ),
-              if (canDelete)
-                ListTile(
-                  leading: const Icon(Icons.delete_outline),
-                  title: Text(_iAmOwner && m.authorId != _myUserId ? 'Удалить (как OWNER)' : 'Удалить'),
-                  onTap: () => Navigator.pop(ctx, 'delete'),
-                ),
-              ListTile(
-                leading: const Icon(Icons.close),
-                title: const Text('Закрыть'),
-                onTap: () => Navigator.pop(ctx, 'close'),
-              ),
-            ],
+              ],
+            ),
           ),
         );
       },
@@ -1098,6 +1111,7 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
         _items[i] = _items[i].copyWith(
           text: 'Сообщение удалено',
           deletedAt: DateTime.now(),
+          attachments: const [],
         );
       }
     });
@@ -1480,9 +1494,19 @@ class _ProjectChatScreenState extends State<ProjectChatScreen> {
                 controller: _ctrl,
                 minLines: 1,
                 maxLines: 5,
+                textAlignVertical: TextAlignVertical.center,
                 decoration: const InputDecoration(
                   hintText: 'Сообщение…',
                   border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  disabledBorder: InputBorder.none,
+                  errorBorder: InputBorder.none,
+                  focusedErrorBorder: InputBorder.none,
+                  filled: false,
+                  fillColor: Colors.transparent,
+                  isDense: true,
+                  contentPadding: EdgeInsets.symmetric(vertical: 14),
                 ),
                 onChanged: (v) {
                   _onComposerChanged(v);
